@@ -684,6 +684,12 @@ def main():
     if shots and segs and board_total != seg_total:
         fails.append("分镜合计 %d 秒 vs 分段合计 %d 秒，不相等" % (board_total, seg_total))
 
+    # R37：一集 4 分钟（240 秒，落 220–260 秒）
+    if seg_durs:
+        if not (220 <= seg_total <= 260):
+            fails.append("一集总时长 %d 秒，不在 4 分钟口径（220–260 秒，目标 240 秒）：少了补戏或并段，多了删并（R37）"
+                         % seg_total)
+
     if scenes:
         covered = {sc for sc in scenes if sc in board_txt}
         missing = [sc for sc in scenes if sc not in covered]
