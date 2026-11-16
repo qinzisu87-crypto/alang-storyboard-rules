@@ -3,6 +3,7 @@
 
 用法：
     python check_rule.py --project <项目目录> --ep EP001
+    跳过剧本（R33）：加 --skip-script，此时不要求 剧本.md，改查分镜场标题的来源
 
 通过时退出码 0，有 FAIL 时退出码 1。
 只查机械项；「段尾停得住」「拍摄手法有理由」这类判断项在结尾以「人工核对」列出。
@@ -440,6 +441,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--project", required=True)
     ap.add_argument("--ep", default="EP001")
+    ap.add_argument("--skip-script", action="store_true", help="R33 跳过剧本模式：不要求 剧本.md")
     args = ap.parse_args()
 
     project = pathlib.Path(args.project)
@@ -457,25 +459,29 @@ def main():
     asset_p = ep_dir / "资产提示词.md"
     char_p = ep_dir / "人物资产.md"
     scene_p = ep_dir / "场景资产.md"
-    for p in (script_p, board_p, seg_p):
+    required = [board_p, seg_p] + ([] if args.skip_script else [script_p])
+    for p in required:
         if not p.is_file():
             fails.append("缺少文件：%s" % p.name)
     if fails:
         report(fails, warns, notes, {}, {}, [])
         return 1
 
-    script_txt = read_text(script_p)
+    script_txt = read_text(script_p) if script_p.is_file() else ""
     board_txt = read_text(board_p)
     seg_txt = read_text(seg_p)
     asset_txt = read_text(asset_p) if asset_p.is_file() else ""
 
     # ---------- 剧本 ----------
+    if args.skip_script and not script_txt:
+        notes["script_skipped"] = True
+        warns.append("已按 R33 跳过剧本层：本集不出 剧本.md，分镜场标题须写小说来源（如「来源：第 3 章 第 2 段」）")
     scenes = RE_SCENE_ID.findall(script_txt)
-    if not scenes:
+    if script_txt and not scenes:
         fails.append("剧本.md 未找到场景标题（应为「## EPxxx-SCxxx 内/外 · 地点 · 时间」）")
     dialogue = [(m.group(1), m.group(2).strip()) for m in RE_DIALOGUE.finditer(script_txt)]
     dialogue = [(s, t) for s, t in dialogue if not s.isdigit()]
-    for line in script_txt.splitlines():
+    for line in (script_txt.splitlines() if script_txt else []):
         if not re.match(r"^([^\s：:\[\]#]{1,9})[：:]", line):
             continue
         head = re.match(r"^([^\s：:\[\]#]{1,8})[：:]", line)
@@ -497,6 +503,11 @@ def main():
     board_scenes = split_blocks(board_txt, RE_BOARD_SCENE)
     if not board_scenes:
         fails.append("分镜.md 未找到场标题（应为「## 第 N 场 ｜ 场名（来源：EPxxx-SCxxx）」）")
+    elif args.skip_script and not script_txt:
+        for blk in board_scenes:
+            head = blk["m"].group(0)
+            if "来源：" not in head:
+                fails.append("跳过了剧本，分镜场标题必须写小说来源：%s" % head.strip()[:40])
 
     shots = split_blocks(board_txt, RE_SHOT)
     if not shots:
@@ -512,12 +523,14 @@ def main():
             fails.append("缺文件：资产提示词.md（人物／场景／道具三节，带 C／S／P 编号）（R27）")
         defined = check_assets(asset_txt, fails)
         script_anchors, board_anchors = set(), set()
-        check_standing(split_blocks(script_txt, RE_SCENE_ID), "剧本.md", defined, fails, warns, script_anchors)
+        if script_txt:
+            check_standing(split_blocks(script_txt, RE_SCENE_ID), "剧本.md", defined, fails, warns, script_anchors)
         check_standing(board_scenes, "分镜.md", defined, fails, warns, board_anchors)
         if script_anchors and board_anchors and script_anchors != board_anchors:
             fails.append("剧本与分镜的锚点编号不一致：剧本 %s / 分镜 %s（R26）"
                          % ("、".join(sorted(script_anchors)), "、".join(sorted(board_anchors))))
-        check_ids(script_txt, "剧本.md", defined, fails)
+        if script_txt:
+            check_ids(script_txt, "剧本.md", defined, fails)
         check_ids(board_txt, "分镜.md", defined, fails)
         check_ids(seg_txt, "分段视频提示词.md", defined, fails)
     notes["assets"] = len(defined)
