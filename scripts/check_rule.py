@@ -377,8 +377,9 @@ def check_scene_assets(txt, fails, warns):
 
 
 
-STYLE_DECL = re.compile(r"画风[：:]\s*((?:F[A-J])-\d{3}|#\d{3})")
-STYLE_CODE = re.compile(r"(F[A-J]-\d{3})")
+STYLE_DECL = re.compile(r"画风[：:]\s*(REF-\d{3})")
+STYLE_TAIL = re.compile(r"画风\s*按\s*(REF-\d{3})\s*[：:]")
+STYLE_ANY = re.compile(r"(REF-\d{3})")
 
 
 def check_multi_speaker(prompt, where, fails):
@@ -405,61 +406,40 @@ def check_line_order(field, where, label, fails):
         fails.append("%s「%s」秒数没按先后排：%s（R34）" % (where, label, (field or "").strip()[:30]))
 
 
-def load_styles():
-    p = pathlib.Path(__file__).resolve().parent.parent / "references" / "画风库.json"
-    try:
-        data = json.loads(p.read_text(encoding="utf-8"))
-    except Exception:
-        return {}, {}
-    codes = {x["number"]: x for x in data}
-    legacy = {"#" + str(x.get("legacy", "")): x["number"] for x in data}
-    return codes, legacy
-
-
 def check_style(texts, fails):
-    """R31：三份资产文件的「画风：」声明必须同编号、编号在 41 条库里存在，
-    每条带「提示词」的条目都要带 `画风 <编号>` 尾巴，且不许混用两个编号。"""
-    codes, legacy = load_styles()
-    if not codes:
-        fails.append("读不到 references/画风库.json，无法核对画风（R31）")
-        return ""
+    """R31：画风只认用户给的参考图。三份资产文件首行的 `画风：REF-xxx` 必须同号，
+    每条带「提示词」的条目都要有 `画风 按 REF-xxx：` 尾巴，且不许混用第二个编号。"""
     decls = {}
     for name, txt in texts.items():
         m = STYLE_DECL.search(txt)
         if m:
-            raw = m.group(1)
-            decls[name] = legacy.get(raw, raw)
+            decls[name] = m.group(1)
     if not decls:
-        fails.append("三份资产文件都没有「画风：FG-005 中文名」声明，出资产前必须先问画风（R31）")
+        fails.append("三份资产文件都没有「画风：REF-001 用户参考图 · …」声明：出资产前先要一张画风参考图（R31）")
         return ""
     distinct = sorted(set(decls.values()))
-    unknown = [c for c in distinct if c not in codes]
-    if unknown:
-        fails.append("画风编号 %s 不在 41 条画风库里，应按 画风库.json 的实际编号选" % "、".join(unknown))
     if len(distinct) > 1:
-        fails.append("画风声明不一致：%s（三份文件必须同一个编号）"
+        fails.append("画风声明不一致：%s（三份文件必须同一个 REF 编号，一集只许一句画风锁）"
                      % "；".join("%s=%s" % (k, v) for k, v in decls.items()))
     code = distinct[0]
-    if code not in codes:
-        return code
     for name, txt in texts.items():
         if name not in decls:
-            fails.append("%s 缺「画风：…」声明（R31）" % name)
+            fails.append("%s 缺「画风：REF-…」声明（R31）" % name)
         missing, mixed = [], set()
         for line in txt.splitlines():
             s = line.strip()
             if not s.startswith("-") or "提示词" not in s:
                 continue
-            if not re.search(r"画风\s+" + re.escape(code), s):
+            if not STYLE_TAIL.search(s):
                 missing.append(s[:26])
-            for c in STYLE_CODE.findall(s):
+            for c in STYLE_ANY.findall(s):
                 if c != code:
                     mixed.add(c)
         if missing:
-            fails.append("%s 有 %d 条提示词没带「画风 %s」尾巴：%s"
+            fails.append("%s 有 %d 条提示词没带「画风 按 %s：…」尾巴：%s"
                          % (name, len(missing), code, "；".join(missing[:3])))
         if mixed:
-            fails.append("%s 混用了别的画风编号：%s（一集只许一个编号）"
+            fails.append("%s 混用了别的画风编号：%s（一集只许一个 REF 编号）"
                          % (name, "、".join(sorted(mixed))))
     return code
 
@@ -764,7 +744,7 @@ def report(fails, warns, notes, info, _unused, segs):
         if info.get("scene_ids"):
             print("场景资产：选择=%s，场景=%s 个" % (info.get("scene_choice"), info["scene_ids"]))
         if info.get("style"):
-            print("画风声明：%s（41 条库内核对见上）" % info["style"])
+            print("画风声明：%s（REF 编号与尾巴见上）" % info["style"])
         if notes["slots"]:
             print("用到的参考图槽：@图片 %s" % "、".join(str(x) for x in sorted(notes["slots"])))
             mx = max(notes["slots"])
