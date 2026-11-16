@@ -30,6 +30,9 @@ SHOT_FIELDS = ["拍摄手法", "动作", "动作先后", "表情", "自然规律
 SEG_FIELDS = ["时长", "场景与轴线", "参考图", "声音", "台词落点", "提示词"]
 MONO_WORDS = ("内心", "独白", "VO", "画外音")
 MOUTH_CONFLICT = ("嘴唇开始动", "说完合上", "嘴唇开合", "嘴唇张开", "嘴巴张开")
+MOUTH_CLAUSE = "其他角色嘴唇闭合"
+SPK_LINE = re.compile(r"^\s*(\d{1,2}):(\d{2})\s*([^\s：:]{1,8})[：:]\s*(.+)$", re.M)
+LINE_ENTRY = re.compile(r"(\d{1,2}):(\d{2})\s*([^\s；;，,、]{1,8})")
 MUSIC_RE = re.compile(r"(BGM|bgm|背景音乐|背景纯音乐|纯音乐|垫乐|配乐)")
 SLOT = re.compile(r"@图片\s*(\d+)")
 RE_SCENE_ASSET_BLOCK = re.compile(r"^##\s*(S\d{2})\s*(.*)$", re.M)
@@ -378,6 +381,30 @@ STYLE_DECL = re.compile(r"画风[：:]\s*((?:F[A-J])-\d{3}|#\d{3})")
 STYLE_CODE = re.compile(r"(F[A-J]-\d{3})")
 
 
+def check_multi_speaker(prompt, where, fails):
+    """R34：多人同场要排队说；一人说时别人嘴不动；同一秒不许两人。"""
+    spk = [(int(a) * 60 + int(b), name) for a, b, name, _ in SPK_LINE.findall(prompt)]
+    if len(set(name for _, name in spk)) >= 2:
+        first = prompt.splitlines()[0] if prompt.splitlines() else ""
+        if MOUTH_CLAUSE not in first:
+            fails.append("%s 多人对话，段首约束行没写「%s」（R34）" % (where, MOUTH_CLAUSE))
+    secs = {}
+    for sec, name in spk:
+        secs.setdefault(sec, set()).add(name)
+    for sec, names in secs.items():
+        if len(names) >= 2:
+            fails.append("%s %d:%02d 有两人同时说话：%s（一句一人、按顺序，R34）"
+                         % (where, sec // 60, sec % 60, "、".join(sorted(names))))
+
+
+def check_line_order(field, where, label, fails):
+    """R34：台词索引／台词落点必须按秒数先后排。"""
+    items = LINE_ENTRY.findall(field or "")
+    secs = [int(a) * 60 + int(b) for a, b, _ in items]
+    if secs != sorted(secs):
+        fails.append("%s「%s」秒数没按先后排：%s（R34）" % (where, label, (field or "").strip()[:30]))
+
+
 def load_styles():
     p = pathlib.Path(__file__).resolve().parent.parent / "references" / "画风库.json"
     try:
@@ -587,6 +614,8 @@ def main():
                 fails.append("%s「台词」栏抄了原文，只该写秒数与说话人" % where)
             if not re.search(r"\d+\s*:\s*\d{2}", tl):
                 fails.append("%s「台词」栏缺秒数（格式 0:02 周野）" % where)
+        check_multi_speaker(pr, where, fails)
+        check_line_order(tl, where, "台词", fails)
         # 独白
         sound = f.get("声音", "")
         is_mono = any(w in sound for w in MONO_WORDS)
@@ -642,6 +671,8 @@ def main():
         if landing and landing != "无":
             if re.search(r"[\u4e00-\u9fa5]{6,}", landing):
                 fails.append("%s「台词落点」抄了原文，只该写秒数与说话人" % where)
+        check_multi_speaker(pr, where, fails)
+        check_line_order(landing, where, "台词落点", fails)
         # 转场标注：跨场次切点
         scene_txt = f.get("场景与轴线", "")
         if ("转场" in scene_txt) and not re.search(r"切[:：]\s*转场", pr):
