@@ -31,7 +31,7 @@ SEG_FIELDS = ["时长", "场景与轴线", "参考图", "声音", "台词落点"
 MONO_WORDS = ("内心", "独白", "VO", "画外音")
 MOUTH_CONFLICT = ("嘴唇开始动", "说完合上", "嘴唇开合", "嘴唇张开", "嘴巴张开")
 MOUTH_CLAUSE = "其他角色嘴唇闭合"
-SPK_LINE = re.compile(r"^\s*(\d{1,2}):(\d{2})\s*([^\s：:]{1,8})[：:]\s*(.+)$", re.M)
+SPK_LINE = re.compile(r"^\s*(\d{1,2}):(\d{2})\s*(?!起幅\s*[：:]|切\s*[：:]|转场\s*[：:])([^\s：:（]{1,8})(?:（[^）]*）)?[：:]\s*(.+)$", re.M)
 LINE_ENTRY = re.compile(r"(\d{1,2}):(\d{2})\s*([^\s；;，,、]{1,8})")
 MUSIC_RE = re.compile(r"(BGM|bgm|背景音乐|背景纯音乐|纯音乐|垫乐|配乐)")
 SLOT = re.compile(r"@图片\s*(\d+)")
@@ -68,8 +68,76 @@ GAZE_RE = re.compile(
     r"|找镜头|迎镜头|追镜头|镜头即|第一人称主观|主观视角|视线[^，。；\n]{0,6}镜头)"
 )
 TIME_LINE = re.compile(r"^\s*(\d{1,2}):(\d{2})\s")
-DIALOGUE_LINE = re.compile(r"^\s*\d{1,2}:\d{2}\s*[^\s：:]{1,8}[：:]")
+DIALOGUE_LINE = re.compile(r"^\s*\d{1,2}:\d{2}\s*(?!起幅\s*[：:]|切\s*[：:]|转场\s*[：:])[^\s：:（]{1,8}(?:（[^）]*）)?[：:]")
+VOICE_LABEL = re.compile(r"^\s*\d{1,2}:\d{2}\s*(?!起幅\s*[：:]|切\s*[：:]|转场\s*[：:])[^\s：:（]{1,8}（([^）]{4,})）\s*[：:]")
+VOICE_PARAM = re.compile(r"(语速|音量|气声|咬字|尾音|停顿|喉部|鼻腔|气息)")
+EMO_WORD = re.compile(r"(情绪|怒|怕|慌|急|冷|喜|悲|讽|疲惫|压抑|平静|平常|常态|冷静|温和|无奈|疑惑|戒备|试探|敷衍|认真|紧张|心虚|克制|兴奋|恐惧|委屈|不甘|[一二三四五六七八九十]成)")
+BODY_RE = re.compile(r"(眉|眼|嘴|唇|下颌|下巴|喉|呼吸|手|指|肩|背|腰|膝|脚|腿|臂|腕|掌|视线|目光|重心|肌肉|咬肌|瞳孔|眼睑)")
 CJK = re.compile(r"[\u4e00-\u9fa5]")
+
+
+def check_segment_detail(pr, where, fails):
+    """R51：分段提示词不是分镜缩写。逐秒行过短、缺起幅即 FAIL。"""
+    lines = [l.strip() for l in pr.splitlines() if TIME_LINE.match(l.strip())]
+    if not lines:
+        return 0
+    bad = 0
+    if not any("起幅" in l for l in lines):
+        fails.append("%s 分段提示词缺「0:00 起幅」（R51 起幅不能省）" % where)
+        bad += 1
+    short = 0
+    for l in lines:
+        if DIALOGUE_LINE.match(l):
+            continue
+        n = len(CJK.findall(l))
+        if n < 15:
+            short += 1
+            if short <= 3:
+                fails.append("%s 分段秒行过短（%d 字）：%s（R51 分段不是分镜缩写，每行至少 15 个汉字）"
+                             % (where, n, l[:40]))
+    if short > 3:
+        fails.append("%s 另有 %d 行分段提示词过短，未逐条列出（R51）" % (where, short - 3))
+    body_lines = [l for l in lines if not DIALOGUE_LINE.match(l) and BODY_RE.search(l)]
+    if not body_lines:
+        fails.append("%s 分段提示词没有任何表情肌／身体／视线细节（R51 不是分镜缩写）" % where)
+        bad += 1
+    return bad + short
+
+
+def check_segment_voice(f, pr, where, fails):
+    """R51：分段台词带情绪与音色标签，声音栏写底声与发声参数。"""
+    sound = f.get("声音", "")
+    dialog = [l.strip() for l in pr.splitlines()
+              if DIALOGUE_LINE.match(l.strip()) and not l.strip().startswith("约束")]
+    bad = 0
+    has_mono = any(w in sound for w in ("独白", "V1-VO", "内心"))
+    if dialog or has_mono:
+        if "音色" not in sound and "音色" not in pr:
+            fails.append("%s 声音栏与台词都没写「音色」基线（R51 情绪可变、音色不变）" % where)
+            bad += 1
+        if not VOICE_PARAM.search(sound + "\n" + pr):
+            fails.append("%s 声音栏没写语速／音量／气声／尾音等发声参数（R51）" % where)
+            bad += 1
+    for l in dialog:
+        m = VOICE_LABEL.match(l)
+        if not m:
+            fails.append("%s 台词行缺「（情绪＋发声＋音色）」标签：%s（R51）" % (where, l[:50]))
+            bad += 1
+            continue
+        label = m.group(1)
+        if "音色" not in label:
+            fails.append("%s 台词行的声音标签没写「音色不变」：%s（R51）" % (where, l[:55]))
+            bad += 1
+        elif not EMO_WORD.search(label):
+            fails.append("%s 台词行的声音标签没写情绪：%s（R51）" % (where, l[:55]))
+            bad += 1
+        elif not VOICE_PARAM.search(label):
+            fails.append("%s 台词行的声音标签没有语速／音量／尾音等参数：%s（R51）" % (where, l[:55]))
+            bad += 1
+    if sound.strip() and not re.sub(r"[，。；、\s]|无配乐|配乐（用户指定）", "", sound):
+        fails.append("%s「声音」栏只写了无配乐，没写底声与台词声（R51）" % where)
+        bad += 1
+    return bad
 
 
 def check_camera_gaze(text, where, fails):
@@ -781,6 +849,8 @@ def main():
                 fails.append("%s 缺「%s」字段" % (where, name))
         pr = prompt_text(f)
         seg_prompt_all.append(pr)
+        check_segment_detail(pr, where, fails)
+        check_segment_voice(f, pr, where, fails)
         if not pr.splitlines() or "约束" not in pr.splitlines()[0]:
             fails.append("%s 提示词第一行不是固定约束行" % where)
         dur = check_time(pr, where, fails)
