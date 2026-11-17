@@ -65,12 +65,15 @@ def scan_music(text, where, fails, require_off=True, allow=False):
 
 GAZE_RE = re.compile(
     r"(直视镜头|看向镜头|望向镜头|对着镜头|盯住镜头|盯紧镜头|锁住镜头"
-    r"|镜头即|第一人称主观|主观视角|视线[^，。；\n]{0,6}镜头)"
+    r"|找镜头|迎镜头|追镜头|镜头即|第一人称主观|主观视角|视线[^，。；\n]{0,6}镜头)"
 )
+TIME_LINE = re.compile(r"^\s*(\d{1,2}):(\d{2})\s")
+DIALOGUE_LINE = re.compile(r"^\s*\d{1,2}:\d{2}\s*[^\s：:]{1,8}[：:]")
+CJK = re.compile(r"[\u4e00-\u9fa5]")
 
 
 def check_camera_gaze(text, where, fails):
-    """R49：第三视角记录，人物不许看镜头。分镜与分段里出现看镜头措辞即 FAIL。"""
+    """R49：第三视角记录，只有镜头找人、没有人找镜头。分镜与分段里出现看镜头措辞即 FAIL。"""
     hits = []
     for i, line in enumerate(text.splitlines(), 1):
         s = line.strip()
@@ -86,6 +89,30 @@ def check_camera_gaze(text, where, fails):
         if len(hits) > 3:
             fails.append("%s 另有 %d 处看镜头写法，未逐条列出（R49）" % (where, len(hits) - 3))
     return len(hits)
+
+
+def check_prompt_detail(pr, where, fails):
+    """R50：分镜提示词逐秒写细。缺起幅、非台词秒行过短即 FAIL。"""
+    lines = [l.strip() for l in pr.splitlines() if TIME_LINE.match(l.strip())]
+    if not lines:
+        return 0
+    bad = 0
+    if not any("起幅" in l for l in lines):
+        fails.append("%s 提示词缺「0:00 起幅」（R50 起幅要写空间与机位）" % where)
+        bad += 1
+    short = 0
+    for l in lines:
+        if DIALOGUE_LINE.match(l):
+            continue
+        n = len(CJK.findall(l))
+        if n < 15:
+            short += 1
+            if short <= 3:
+                fails.append("%s 提示词秒行过短（%d 字）：%s（R50 每行写细，至少 15 个汉字）"
+                             % (where, n, l[:40]))
+    if short > 3:
+        fails.append("%s 另有 %d 行提示词过短，未逐条列出（R50）" % (where, short - 3))
+    return bad + short
 
 
 def read_text(p):
@@ -700,6 +727,7 @@ def main():
                 fails.append("%s 缺「%s」栏" % (where, name))
         pr = prompt_text(f)
         board_prompt_all.append(pr)
+        check_prompt_detail(pr, where, fails)
         dur = check_time(pr, where, fails)
         shot_durs[sid] = dur
         if dur and dur > 15:
