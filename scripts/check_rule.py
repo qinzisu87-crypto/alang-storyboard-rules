@@ -407,41 +407,72 @@ def check_line_order(field, where, label, fails):
 
 
 def check_style(texts, fails):
-    """R31：画风只认用户给的参考图。三份资产文件首行的 `画风：REF-xxx` 必须同号，
-    每条带「提示词」的条目都要有 `画风 按 REF-xxx：` 尾巴，且不许混用第二个编号。"""
+    """R31＋R47：画风只认用户给的参考图，分两次问——先人物，再场景／道具。
+    允许一集两句锁：人物一句（REF-001）、场景与道具一句（REF-002，可沿用同号）。
+    人物资产.md 用人物号；场景资产.md 用场景道具号；资产提示词.md 按小节分别对号；
+    每条带「提示词」的条目都要有 `画风 按 REF-xxx：` 尾巴，且必须与所在层对号。"""
+    def codes_of(txt):
+        return sorted(set(STYLE_DECL.findall(txt)))
+
     decls = {}
     for name, txt in texts.items():
-        m = STYLE_DECL.search(txt)
-        if m:
-            decls[name] = m.group(1)
+        cs = codes_of(txt)
+        if cs:
+            decls[name] = cs
     if not decls:
         fails.append("三份资产文件都没有「画风：REF-001 用户参考图 · …」声明：出资产前先要一张画风参考图（R31）")
         return ""
-    distinct = sorted(set(decls.values()))
-    if len(distinct) > 1:
-        fails.append("画风声明不一致：%s（三份文件必须同一个 REF 编号，一集只许一句画风锁）"
-                     % "；".join("%s=%s" % (k, v) for k, v in decls.items()))
-    code = distinct[0]
+
+    all_codes = sorted({c for cs in decls.values() for c in cs})
+    if len(all_codes) > 2:
+        fails.append("画风声明超过两句锁：%s（一集最多「人物一句＋场景道具一句」，R47）"
+                     % "、".join(all_codes))
+
+    # 人物号与场景道具号：按声明里出现的顺序定，第一个当人物，第二个当场景／道具
+    char_code = all_codes[0]
+    scene_code = all_codes[1] if len(all_codes) > 1 else char_code
+
+    for name, cs in decls.items():
+        if len(cs) > 1 and name != "资产提示词.md":
+            fails.append("%s 声明了多个画风编号：%s（人物资产只写人物锁，场景资产只写场景道具锁，R47）"
+                         % (name, "、".join(cs)))
+
     for name, txt in texts.items():
         if name not in decls:
             fails.append("%s 缺「画风：REF-…」声明（R31）" % name)
-        missing, mixed = [], set()
+            continue
+        if name == "人物资产.md":
+            expect = char_code
+        elif name == "场景资产.md":
+            expect = scene_code
+        else:
+            # 资产提示词.md：按「## 人物／## 场景／## 道具」小节分号
+            expect = None
+
+        section = "人物"
+        bad = []
         for line in txt.splitlines():
-            s = line.strip()
-            if not s.startswith("-") or "提示词" not in s:
+            st = line.strip()
+            hm = re.match(r"^#{1,3}\s*([人物场景道具]+)", st)
+            if hm:
+                section = hm.group(1)
                 continue
-            if not STYLE_TAIL.search(s):
-                missing.append(s[:26])
-            for c in STYLE_ANY.findall(s):
-                if c != code:
-                    mixed.add(c)
-        if missing:
-            fails.append("%s 有 %d 条提示词没带「画风 按 %s：…」尾巴：%s"
-                         % (name, len(missing), code, "；".join(missing[:3])))
-        if mixed:
-            fails.append("%s 混用了别的画风编号：%s（一集只许一个 REF 编号）"
-                         % (name, "、".join(sorted(mixed))))
-    return code
+            if not st.startswith("-") or "提示词" not in st:
+                continue
+            want = expect
+            if want is None:
+                want = scene_code if section in ("场景", "道具") else char_code
+            tails = STYLE_TAIL.findall(st)
+            if not tails:
+                bad.append((st[:26], "缺尾巴", want))
+                continue
+            if any(c != want for c in tails):
+                bad.append((st[:26], "用错号 " + "、".join(tails), want))
+        if bad:
+            sample = "；".join("%s（%s，应为 %s）" % (a, b, c) for a, b, c in bad[:3])
+            fails.append("%s 有 %d 条提示词画风对不上：%s（R47）" % (name, len(bad), sample))
+
+    return char_code if len(all_codes) == 1 else "%s／%s" % (char_code, scene_code)
 
 
 def check_coverage(script_txt, board_txt, seg_txt, asset_txt, defined, fails, warns):
