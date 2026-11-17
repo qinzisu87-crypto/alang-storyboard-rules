@@ -63,6 +63,31 @@ def scan_music(text, where, fails, require_off=True, allow=False):
         break
 
 
+GAZE_RE = re.compile(
+    r"(直视镜头|看向镜头|望向镜头|对着镜头|盯住镜头|盯紧镜头|锁住镜头"
+    r"|镜头即|第一人称主观|主观视角|视线[^，。；\n]{0,6}镜头)"
+)
+
+
+def check_camera_gaze(text, where, fails):
+    """R49：第三视角记录，人物不许看镜头。分镜与分段里出现看镜头措辞即 FAIL。"""
+    hits = []
+    for i, line in enumerate(text.splitlines(), 1):
+        s = line.strip()
+        if not s:
+            continue
+        m = GAZE_RE.search(s)
+        if m:
+            hits.append((i, m.group(0), s[:60]))
+    if hits:
+        for ln, kw, ctx in hits[:3]:
+            fails.append("%s 第 %d 行出现看镜头写法「%s」：%s（R49 第三视角，人物不看镜头）"
+                         % (where, ln, kw, ctx))
+        if len(hits) > 3:
+            fails.append("%s 另有 %d 处看镜头写法，未逐条列出（R49）" % (where, len(hits) - 3))
+    return len(hits)
+
+
 def read_text(p):
     raw = p.read_bytes()
     for enc in ("utf-8", "utf-8-sig"):
@@ -566,6 +591,12 @@ def main():
     seg_txt = read_text(seg_p)
     asset_txt = read_text(asset_p) if asset_p.is_file() else ""
 
+    # ---------- R49 第三视角，人物不看镜头 ----------
+    gaze_total = 0
+    for name, txt in (("分镜.md", board_txt), ("分段视频提示词.md", seg_txt)):
+        gaze_total += check_camera_gaze(txt, name, fails)
+    notes["camera_gaze"] = gaze_total
+
     # ---------- 剧本 ----------
     if args.skip_script and not script_txt:
         notes["script_skipped"] = True
@@ -837,6 +868,8 @@ def report(fails, warns, notes, info, _unused, segs):
             print("场景资产：选择=%s，场景=%s 个" % (info.get("scene_choice"), info["scene_ids"]))
         if info.get("style"):
             print("画风声明：%s（REF 编号与尾巴见上）" % info["style"])
+        if notes.get("camera_gaze"):
+            print("R49 看镜头写法：%d 处（明细见 FAIL）" % notes["camera_gaze"])
         if notes["slots"]:
             print("用到的参考图槽：@图片 %s" % "、".join(str(x) for x in sorted(notes["slots"])))
             mx = max(notes["slots"])
