@@ -148,7 +148,7 @@ def check_segment_gaze(pr, where, fails):
     """R52：分段段首约束行必须写死「人物不看镜头」。"""
     first = pr.splitlines()[0] if pr.splitlines() else ""
     if "人物不看镜头" not in first:
-        fails.append("%s 段首约束行没写「人物不看镜头，视线落在场景内对象或对手，镜头只拍脸、眼睛不对镜头」（R52）" % where)
+        fails.append("%s 段首约束行没写「人物不看镜头，视线落在场景内对象或对手，镜头可拍脸、可拍眼睛，人物眼睛不对镜头」（R52）" % where)
         return 1
     return 0
 
