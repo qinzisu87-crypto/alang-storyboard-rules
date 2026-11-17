@@ -65,7 +65,11 @@ def scan_music(text, where, fails, require_off=True, allow=False):
 
 GAZE_RE = re.compile(
     r"(直视镜头|看向镜头|望向镜头|对着镜头|盯住镜头|盯紧镜头|锁住镜头"
-    r"|找镜头|迎镜头|追镜头|镜头即|第一人称主观|主观视角|视线[^，。；\n]{0,6}镜头)"
+    r"|找镜头|迎镜头|追镜头|目视镜头|注视镜头|镜头即"
+    r"|眼睛[^，。；\n]{0,4}镜头|目光[^，。；\n]{0,4}镜头|眼神[^，。；\n]{0,4}镜头"
+    r"|眼球[^，。；\n]{0,4}镜头|瞳孔[^，。；\n]{0,4}镜头"
+    r"|看向观众|望向观众|直视观众|对着观众"
+    r"|第一人称主观|主观视角|视线[^，。；\n]{0,6}镜头)"
 )
 TIME_LINE = re.compile(r"^\s*(\d{1,2}):(\d{2})\s")
 DIALOGUE_LINE = re.compile(r"^\s*\d{1,2}:\d{2}\s*(?!起幅\s*[：:]|切\s*[：:]|转场\s*[：:])[^\s：:（]{1,8}(?:（[^）]*）)?[：:]")
@@ -140,8 +144,17 @@ def check_segment_voice(f, pr, where, fails):
     return bad
 
 
+def check_segment_gaze(pr, where, fails):
+    """R52：分段段首约束行必须写死「人物不看镜头」。"""
+    first = pr.splitlines()[0] if pr.splitlines() else ""
+    if "人物不看镜头" not in first:
+        fails.append("%s 段首约束行没写「人物不看镜头，视线落在场景内对象或对手，镜头只拍脸、眼睛不对镜头」（R52）" % where)
+        return 1
+    return 0
+
+
 def check_camera_gaze(text, where, fails):
-    """R49：第三视角记录，只有镜头找人、没有人找镜头。分镜与分段里出现看镜头措辞即 FAIL。"""
+    """R49/R52：第三视角记录，只有镜头找人、没有人找镜头。分镜与分段里出现看镜头措辞即 FAIL。"""
     hits = []
     for i, line in enumerate(text.splitlines(), 1):
         s = line.strip()
@@ -152,10 +165,10 @@ def check_camera_gaze(text, where, fails):
             hits.append((i, m.group(0), s[:60]))
     if hits:
         for ln, kw, ctx in hits[:3]:
-            fails.append("%s 第 %d 行出现看镜头写法「%s」：%s（R49 第三视角，人物不看镜头）"
+            fails.append("%s 第 %d 行出现看镜头写法「%s」：%s（R49／R52 第三视角，人物不看镜头）"
                          % (where, ln, kw, ctx))
         if len(hits) > 3:
-            fails.append("%s 另有 %d 处看镜头写法，未逐条列出（R49）" % (where, len(hits) - 3))
+            fails.append("%s 另有 %d 处看镜头写法，未逐条列出（R49／R52）" % (where, len(hits) - 3))
     return len(hits)
 
 
@@ -851,6 +864,7 @@ def main():
         seg_prompt_all.append(pr)
         check_segment_detail(pr, where, fails)
         check_segment_voice(f, pr, where, fails)
+        check_segment_gaze(pr, where, fails)
         if not pr.splitlines() or "约束" not in pr.splitlines()[0]:
             fails.append("%s 提示词第一行不是固定约束行" % where)
         dur = check_time(pr, where, fails)
