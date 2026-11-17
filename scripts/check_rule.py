@@ -444,11 +444,67 @@ def check_style(texts, fails):
     return code
 
 
+def check_coverage(script_txt, board_txt, seg_txt, asset_txt, defined, fails, warns):
+    """R44：剧本／分镜／分段里出现的人物、场景、道具，资产表必须有；未用到的资产标「未使用」。"""
+    layers = (("剧本.md", script_txt), ("分镜.md", board_txt), ("分段视频提示词.md", seg_txt))
+    used = set()
+    for _, txt in layers:
+        for m in RE_ID_REF.finditer(txt):
+            if len(m.group(2)) == 2:
+                used.add(m.group(1) + m.group(2))
+    if defined:
+        unused = sorted(defined - used)
+        if unused:
+            warns.append("资产表登记但本集三层都没用到：%s（标「未使用」，编号保留、不删，R44）"
+                         % "、".join("@" + a for a in unused))
+    if script_txt:
+        for blk in split_blocks(script_txt, RE_SCENE_ID):
+            head = blk["m"].group(0).strip()
+            cids = set("C" + m.group(2) for m in RE_ID_REF.finditer(blk["body"])
+                       if m.group(1) == "C" and len(m.group(2)) == 2)
+            if not cids:
+                fails.append("%s 本场没有任何 @Cxx 人物编号，资产无法核对（R44）" % head[:34])
+    cnames = {}
+    if asset_txt:
+        for line in asset_txt.splitlines():
+            m = RE_ASSET_ITEM.match(line.strip())
+            if not m or m.group(1) != "C" or len(m.group(2)) != 2:
+                continue
+            parts = [p.strip() for p in m.group(3).lstrip("｜").split("｜")]
+            if parts and parts[0]:
+                cnames[parts[0]] = "C" + m.group(2)
+    if script_txt and cnames:
+        speakers = set(s for s in re.findall(r"^([^\s：:\[\]#]{1,8})[：:]", script_txt, re.M)
+                       if not s.isdigit() and "*" not in s)
+        unknown = sorted(s for s in speakers if s not in cnames
+                         and s not in ("题材", "说话顺序", "系统", "画外", "电视播报"))
+        if unknown:
+            warns.append("剧本台词里的说话人未在资产表登记为人物：%s（若是画外音／播报可忽略，否则补编号，R44）"
+                         % "、".join(unknown))
+
+
+def check_handoff(project, ep, fails, warns, require=False):
+    """R45：项目根必须有 项目交接.md，含小说进度／集间承接／已产出资产／画风／待办。"""
+    p = project / "项目交接.md"
+    if not p.is_file():
+        msg = ("缺 项目交接.md（项目根）：要写小说改到哪里、本集结尾与下集承接、已产出资产清单、画风锁、待办（R45）")
+        (fails if require else warns).append(msg)
+        return
+    txt = read_text(p)
+    needed = [("小说", "小说改编进度"), ("承接", "集间承接"), ("资产", "已产出资产"), ("画风", "画风"), ("待办", "待办")]
+    for _, label in needed:
+        if label not in txt:
+            (fails if require else warns).append("项目交接.md 缺小节「%s」（R45）" % label)
+    if ep not in txt:
+        warns.append("项目交接.md 里没有 %s 的记录，做完这一集要补一节（R45）" % ep)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--project", required=True)
     ap.add_argument("--ep", default="EP001")
     ap.add_argument("--skip-script", action="store_true", help="R33 跳过剧本模式：不要求 剧本.md")
+    ap.add_argument("--require-handoff", action="store_true", help="R45：缺少或不完整的 项目交接.md 直接判 FAIL")
     args = ap.parse_args()
 
     project = pathlib.Path(args.project)
@@ -487,7 +543,10 @@ def main():
     if script_txt and not scenes:
         fails.append("剧本.md 未找到场景标题（应为「## EPxxx-SCxxx 内/外 · 地点 · 时间」）")
     dialogue = [(m.group(1), m.group(2).strip()) for m in RE_DIALOGUE.finditer(script_txt)]
-    dialogue = [(s, t) for s, t in dialogue if not s.isdigit()]
+    # 排除非台词行：题材行、「**说话顺序**：① A → ② B」这类索引行
+    dialogue = [(s, t) for s, t in dialogue
+                if not s.isdigit() and "*" not in s and "→" not in t
+                and s not in ("题材", "说话顺序")]
     for line in (script_txt.splitlines() if script_txt else []):
         if not re.match(r"^([^\s：:\[\]#]{1,9})[：:]", line):
             continue
@@ -541,6 +600,8 @@ def main():
         check_ids(board_txt, "分镜.md", defined, fails)
         check_ids(seg_txt, "分段视频提示词.md", defined, fails)
     notes["assets"] = len(defined)
+    check_coverage(script_txt, board_txt, seg_txt, asset_txt, defined, fails, warns)
+    check_handoff(project, args.ep, fails, warns, require=args.require_handoff)
 
     if char_p.is_file():
         char_txt = read_text(char_p)
