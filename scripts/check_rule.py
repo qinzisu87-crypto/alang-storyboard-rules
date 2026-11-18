@@ -24,10 +24,23 @@ RE_DIALOGUE = re.compile(r"^([^\s：:\[\]#]{1,8})[：:]\s*(\S.*)$", re.M)
 RE_BOARD_SCENE = re.compile(r"^##\s*第\s*(\d+)\s*场\s*[｜|]\s*(.+)$", re.M)
 RE_SHOT = re.compile(r"^###\s*镜头\s*(\d+-\d+)\s*[｜|]\s*(.+)$", re.M)
 RE_SEG = re.compile(r"^##\s*第\s*(\d+)\s*段\s*(?:[｜|]\s*(.+))?$", re.M)
+RE_SEG_SECTION = re.compile(r"^([a-z_]+)\s*:\s*$", re.M)
+RE_SHOT_TAG = re.compile(r"\[Shot\s+\d+\]")
+RE_SUBJECT = re.compile(r"<Subject\s+\d+>")
+RE_PICTURE = re.compile(r"<Picture\s+\d+>")
+RE_SPEAKER = re.compile(r"\(S\d+(?:,[^)]*)?\)")
+RE_DIALOG_TAG = re.compile(r"<d>\s*\[[^\]]+\][^<]*</d>")
 TIME_CODE_RE = re.compile(r"(?<!\d)(\d{1,2}):(\d{2})(?!\d)")
 
 SHOT_FIELDS = ["拍摄手法", "动作", "动作先后", "表情", "自然规律", "声音", "台词", "参考图", "提示词"]
-SEG_FIELDS = ["时长", "场景与轴线", "参考图", "声音", "台词落点", "提示词"]
+# 分段元数据行（供审阅对账，不贴给工具）；可贴给工具的六段标题在 SEG_SECTIONS 里单独校验
+SEG_FIELDS = ["时长", "场景与轴线", "表演参考", "参考图", "标签映射", "说话人"]
+SEG_SECTIONS = ["subject_definitions", "summary", "retention_analysis",
+                "detailed_description", "overall_soundscape", "non_diegetic_music"]
+SEG_TASK_TYPES = ["keyframe completion", "reference generation", "video editing",
+                  "video continuation", "audio reuse", "audio reference"]
+VIS_MARKERS = ["fully_preserved", "partially_preserved", "attribute_transfer", "weak_reference"]
+AUD_MARKERS = ["fully_copy", "partially_copy", "reference", "weak_reference"]
 MONO_WORDS = ("内心", "独白", "VO", "画外音")
 MOUTH_CONFLICT = ("嘴唇开始动", "说完合上", "嘴唇开合", "嘴唇张开", "嘴巴张开")
 MOUTH_CLAUSE = "其他角色嘴唇闭合"
@@ -70,94 +83,196 @@ GAZE_RE = re.compile(
     r"|第一人称主观|主观视角|视线[^，。；\n]{0,6}镜头)"
 )
 DIALOGUE_LINE = re.compile(r"^\s*(?!约束|起幅|切\s*[：:]|转场|镜头|画面)[^\s：:（]{1,8}(?:（[^）]*）)?[：:]")
-VOICE_LABEL = re.compile(r"^\s*(?!约束|起幅|切\s*[：:]|转场|镜头|画面)[^\s：:（]{1,8}（([^）]{4,})）\s*[：:]")
-VOICE_PARAM = re.compile(r"(语速|音量|气声|咬字|尾音|停顿|喉部|鼻腔|气息)")
-EMO_WORD = re.compile(r"(情绪|怒|怕|慌|急|冷|喜|悲|讽|疲惫|压抑|平静|平常|常态|冷静|温和|无奈|疑惑|戒备|试探|敷衍|认真|紧张|心虚|克制|兴奋|恐惧|委屈|不甘|[一二三四五六七八九十]成)")
 BODY_RE = re.compile(r"(眉|眼|嘴|唇|下颌|下巴|喉|呼吸|手|指|肩|背|腰|膝|脚|腿|臂|腕|掌|视线|目光|重心|肌肉|咬肌|瞳孔|眼睑)")
+BODY_RE_EN = re.compile(r"(eye|eyes|eyelid|pupil|gaze|brow|jaw|lip|lips|mouth|throat|breath|shoulder|hand|finger|wrist|palm|weight|neck|tendon|chin|face|spine|knee|foot)", re.I)
 CJK = re.compile(r"[\u4e00-\u9fa5]")
 
 
 def check_no_timecode(pr, where, fails):
-    """R13：分镜与分段提示词都不写时间码。"""
+    """R13：分镜提示词不写时间码；分段层按官方 Ref2VA 切点，不套本函数。"""
     hits = [(i, m.group(0)) for i, l in enumerate(pr.splitlines(), 1)
             for m in TIME_CODE_RE.finditer(l)]
     for line_no, code in hits[:3]:
-        fails.append("%s 第 %d 行出现时间码「%s」（R13 提示词不写时间码）" % (where, line_no, code))
+        fails.append("%s 第 %d 行出现时间码「%s」（R13 分镜提示词不写时间码）" % (where, line_no, code))
     if len(hits) > 3:
         fails.append("%s 另有 %d 处时间码，未逐条列出（R13）" % (where, len(hits) - 3))
     return len(hits)
 
 
-def check_segment_detail(pr, where, fails):
-    """R51/R53：分段提示词不是分镜缩写。动作句过短、没有起幅即 FAIL。"""
-    lines = [l.strip() for l in pr.splitlines() if not DIALOGUE_LINE.match(l.strip())]
-    lines = [l for l in lines if l and not l.startswith("约束")]
-    if not lines:
+def _seg_sections(body):
+    """把一段分段正文按官方字段行切开，返回 {段名: 正文}。"""
+    hits = list(RE_SEG_SECTION.finditer(body))
+    d = {}
+    for i, h in enumerate(hits):
+        end = hits[i + 1].start() if i + 1 < len(hits) else len(body)
+        d[h.group(1)] = body[h.end():end]
+    return d
+
+
+def check_segment_sections(body, where, fails, warns):
+    """R20：官方 Ref2VA 六段字段齐全、顺序固定、六段前无约束段；detailed_description 不成分镜缩写（R51）。"""
+    sec = _seg_sections(body)
+    hits = list(RE_SEG_SECTION.finditer(body))
+    if not hits:
+        fails.append("%s 没有官方六段字段行（应为 subject_definitions: 这种写法，不用 ###，R20）" % where)
+        return sec
+    first_pos = hits[0].start()
+    prefix = body[:first_pos]
+    if "约束" in prefix:
+        fails.append("%s 六段前加了中文约束段；官方六段前不许加额外段（R20／R52）" % where)
+    if re.search(r"^###\s*[a-z_]+\s*$", body, re.M):
+        fails.append("%s 六段用了 ### 标题；官方要求字段行 subject_definitions: 这种写法（R20）" % where)
+    order = [h.group(1) for h in hits if h.group(1) in SEG_SECTIONS]
+    if order[:len(SEG_SECTIONS)] != SEG_SECTIONS:
+        fails.append("%s 六段顺序不对：当前 %s；应为 %s（R20）"
+                     % (where, " / ".join(order) or "无", " / ".join(SEG_SECTIONS)))
+    missing = [x for x in SEG_SECTIONS if x not in sec]
+    if missing:
+        fails.append("%s 缺六段：%s（R20 六段缺一不可）"
+                     % (where, "、".join(x + ":" for x in missing)))
+        return sec
+
+    detail = sec["detailed_description"]
+    if not RE_SHOT_TAG.search(detail):
+        fails.append("%s detailed_description 缺 [Shot N] 镜头编号（R20）" % where)
+    if not any(BODY_RE.search(l) or BODY_RE_EN.search(l) for l in detail.splitlines()):
+        fails.append("%s detailed_description 没有任何表情肌／身体／视线细节（R51 不是分镜缩写）" % where)
+
+    subj_def = sec["subject_definitions"]
+    subj_used = set(RE_SUBJECT.findall(detail))
+    subj_decl = set(RE_SUBJECT.findall(subj_def))
+    if subj_decl and not subj_used:
+        fails.append("%s subject_definitions 定义了 %s，但 detailed_description 没有引用 <Subject N>（R53 标签一致）"
+                     % (where, "、".join(sorted(subj_decl))))
+
+    # <Picture N> 只允许当首帧/尾帧/关键帧/构图锚点/故事板；人物三视图、场景图只作主体来源
+    for line in subj_def.splitlines():
+        st = line.strip()
+        if re.match(r"<Picture\s+\d+>\s*[:：]", st):
+            if not re.search(r"(first frame|last frame|tail frame|key frame|keyframe|storyboard|composition anchor|start frame|end frame|首帧|尾帧|关键帧|构图锚点|故事板)", st, re.I):
+                fails.append("%s 单独定义了 <Picture N>，但没写它作为首帧/尾帧/关键帧/构图锚点/故事板；人物/场景/道具参考图应折进 <Subject N>（R20）" % where)
+
+    summary = sec["summary"].strip()
+    m = re.match(r"\[([^\]]+)\]", summary)
+    if not m:
+        fails.append("%s summary 没有以方括号任务类型开头，例如 [reference generation]（R20）" % where)
+    else:
+        tasks = [t.strip() for t in re.split(r"\+|,", m.group(1)) if t.strip()]
+        bad = [t for t in tasks if t not in SEG_TASK_TYPES]
+        if bad:
+            fails.append("%s summary 任务类型不在官方六类：%s（R20）" % (where, "、".join(bad)))
+        if "video continuation" in tasks and "<Video" not in body:
+            warns.append("%s summary 写了 video continuation，但本段没有 <Video N>；没有把上一段视频当输入时不许写（R20）" % where)
+
+    ret = sec["retention_analysis"].strip()
+    if not ret:
+        fails.append("%s retention_analysis 为空（R20）" % where)
+    else:
+        bad = 0
+        for line in ret.splitlines():
+            st = line.strip()
+            if not st:
+                continue
+            if st.startswith("<") and not any(k in st for k in VIS_MARKERS + AUD_MARKERS):
+                bad += 1
+                if bad <= 3:
+                    fails.append("%s retention_analysis 缺合法保留度标记：%s（R20）" % (where, st[:60]))
+        if bad > 3:
+            fails.append("%s retention_analysis 另有 %d 条缺合法标记（R20）" % (where, bad - 3))
+
+    words = len(re.findall(r"[A-Za-z]+", detail))
+    if words and not (350 <= words <= 500):
+        warns.append("%s detailed_description 约 %d 个英文词，官方建议 350–500（台词密集段可放宽，R51）" % (where, words))
+
+    sound = sec["overall_soundscape"].strip()
+    if not sound:
+        fails.append("%s overall_soundscape 为空；环境声、动作声、非语言人声 1–4 句（R20）" % where)
+    elif sound == "N/A" and "静音" not in body:
+        warns.append("%s overall_soundscape 写了 N/A；只有用户明确要求全片静音才可写（R20）" % where)
+    return sec
+
+
+def check_official_timecodes(detail, declared, where, fails):
+    """R18/R53：首镜 [Shot 1] 不写时间码；后续镜 At MM:SS.mmm 严格递增且小于段长。"""
+    marks = [(int(m.group(1)), m) for m in re.finditer(r"\[Shot\s+(\d+)\]", detail)]
+    if not marks:
         return 0
+    nums = [n for n, _ in marks]
+    if nums[0] != 1:
+        fails.append("%s 第一镜不是 [Shot 1]（R18）" % where)
+    for i, (n, m) in enumerate(marks):
+        if n != i + 1:
+            fails.append("%s 镜头编号不连续：第 %d 个是 [Shot %d]（R18）" % (where, i + 1, n))
+            break
+    times = []
     bad = 0
-    if not any(l.startswith("起幅") for l in lines):
-        fails.append("%s 分段提示词没有从「起幅：」开始（R13 每个生成段从起幅写起）" % where)
-        bad += 1
-    short = 0
-    for l in lines:
-        if l.startswith(("切：", "切:", "转场")):
+    for n, m in marks:
+        line_end = detail.find("\n", m.end())
+        tail = detail[m.end(): line_end if line_end != -1 else len(detail)]
+        at = re.match(r"\s*At\s+(\d{2}):(\d{2})\.(\d{3})", tail)
+        if n == 1:
+            if at:
+                fails.append("%s [Shot 1] 写了时间码；首镜不许写 At MM:SS.mmm（R18）" % where)
+                bad += 1
             continue
-        n = len(CJK.findall(l))
-        if n < 15:
-            short += 1
-            if short <= 3:
-                fails.append("%s 分段动作句过短（%d 字）：%s（R51 分段不是分镜缩写，每句至少 15 个汉字）"
-                             % (where, n, l[:40]))
-    if short > 3:
-        fails.append("%s 另有 %d 句分段提示词过短，未逐条列出（R51）" % (where, short - 3))
-    body_lines = [l for l in lines if BODY_RE.search(l)]
-    if not body_lines:
-        fails.append("%s 分段提示词没有任何表情肌／身体／视线细节（R51 不是分镜缩写）" % where)
-        bad += 1
-    return bad + short
-
-
-def check_segment_voice(f, pr, where, fails):
-    """R51：分段台词带情绪与音色标签，声音栏写底声与发声参数。"""
-    sound = f.get("声音", "")
-    dialog = [l.strip() for l in pr.splitlines()
-              if DIALOGUE_LINE.match(l.strip()) and not l.strip().startswith("约束")]
-    bad = 0
-    has_mono = any(w in sound for w in ("独白", "V1-VO", "内心"))
-    if dialog or has_mono:
-        if "音色" not in sound and "音色" not in pr:
-            fails.append("%s 声音栏与台词都没写「音色」基线（R51 情绪可变、音色不变）" % where)
-            bad += 1
-        if not VOICE_PARAM.search(sound + "\n" + pr):
-            fails.append("%s 声音栏没写语速／音量／气声／尾音等发声参数（R51）" % where)
-            bad += 1
-    for l in dialog:
-        m = VOICE_LABEL.match(l)
-        if not m:
-            fails.append("%s 台词行缺「（情绪＋发声＋音色）」标签：%s（R51）" % (where, l[:50]))
+        if not at:
+            fails.append("%s [Shot %d] 缺 At MM:SS.mmm 切点（R18）" % (where, n))
             bad += 1
             continue
-        label = m.group(1)
-        if "音色" not in label:
-            fails.append("%s 台词行的声音标签没写「音色不变」：%s（R51）" % (where, l[:55]))
+        secs = int(at.group(1)) * 60 + int(at.group(2)) + int(at.group(3)) / 1000.0
+        times.append((n, secs))
+    for i in range(1, len(times)):
+        if times[i][1] <= times[i - 1][1]:
+            fails.append("%s [Shot %d] 切点 %.3f 秒没有严格大于 [Shot %d] 的 %.3f 秒（R18）"
+                         % (where, times[i][0], times[i][1], times[i - 1][0], times[i - 1][1]))
             bad += 1
-        elif not EMO_WORD.search(label):
-            fails.append("%s 台词行的声音标签没写情绪：%s（R51）" % (where, l[:55]))
-            bad += 1
-        elif not VOICE_PARAM.search(label):
-            fails.append("%s 台词行的声音标签没有语速／音量／尾音等参数：%s（R51）" % (where, l[:55]))
-            bad += 1
-    if sound.strip() and not re.sub(r"[，。；、\s]|无配乐|配乐（用户指定）", "", sound):
-        fails.append("%s「声音」栏只写了无配乐，没写底声与台词声（R51）" % where)
+    if declared and times and times[-1][1] >= declared:
+        fails.append("%s 最后一个切点 %.3f 秒不小于段长 %d 秒（R18）" % (where, times[-1][1], declared))
         bad += 1
     return bad
 
 
-def check_segment_gaze(pr, where, fails):
-    """R52：分段段首约束行必须写死「人物不看镜头」。"""
-    first = pr.splitlines()[0] if pr.splitlines() else ""
-    if "人物不看镜头" not in first:
-        fails.append("%s 段首约束行没写「人物不看镜头，视线落在场景内对象或对手，镜头可拍脸、可拍眼睛，人物眼睛不对镜头」（R52）" % where)
+def check_segment_dialogue(sec, where, fails):
+    """R51/R53：台词挂 (Sx) 说话人编号并包进 <d>[Language] 原文</d>；独白写不张嘴。"""
+    detail = sec.get("detailed_description", "")
+    if not detail:
+        return
+    d_tags = RE_DIALOG_TAG.findall(detail)
+    speakers = RE_SPEAKER.findall(detail)
+    if d_tags and not speakers:
+        fails.append("%s detailed_description 有 <d> 台词但没挂 (Sx) 说话人编号（R20.2）" % where)
+    if speakers and not d_tags:
+        fails.append("%s detailed_description 有 (Sx) 编号但台词没包进 <d>[Language] 原文</d>（R53）" % where)
+    for line in detail.splitlines():
+        if RE_DIALOG_TAG.search(line):
+            continue
+        if len(CJK.findall(line)) >= 6:
+            fails.append("%s detailed_description 叙述句出现中文（除 <d> 内台词与画内可见引文外正文应为英文，R53）：%s"
+                         % (where, line.strip()[:40]))
+            break
+    if "says in an off-screen voiceover" in detail.lower() and "lips remain completely closed" not in detail:
+        fails.append("%s 画外音/独白没写 lips remain completely closed（R22 独白不张嘴）" % where)
+
+
+def check_segment_music(sec, where, fails):
+    """R25：non_diegetic_music 段为 N/A 或标注用户指定；其余段不出现配乐词。"""
+    music = sec.get("non_diegetic_music", "")
+    allow = "用户指定" in music or "user-specified" in music.lower()
+    if not allow and music.strip() and music.strip() != "N/A":
+        fails.append("%s non_diegetic_music 未写 N/A 且未标注「配乐（用户指定）」（R25 默认无配乐）" % where)
+    for name in ("overall_soundscape", "detailed_description"):
+        body = sec.get(name, "")
+        for m in MUSIC_RE.finditer(body):
+            fails.append("%s %s 出现未经用户点名的配乐词「%s」（R25）" % (where, name, m.group(0)))
+            break
+
+
+def check_segment_gaze(sec, where, fails):
+    """R52：detailed_description 风格句后必须有英文「镜头是旁观者、人物不看镜头」硬句。"""
+    detail = sec.get("detailed_description", "")
+    low = detail.lower()
+    if "outside witness" not in low or "no character looks into the lens" not in low:
+        fails.append("%s detailed_description 缺英文不看镜头硬句（outside witness / No character looks into the lens，R52）" % where)
         return 1
     return 0
 
@@ -517,7 +632,7 @@ def check_multi_speaker(prompt, where, fails):
 
 
 def check_line_order(field, where, label, fails):
-    """R34：台词索引／台词落点按 ①②③ 排，不许写时间码。"""
+    """R34：台词索引／说话人索引按 ①②③ 排，不许写时间码。"""
     text = field or ""
     if TIME_CODE_RE.search(text):
         fails.append("%s「%s」写了时间码：%s（R13 不写时间码，按 ①②③ 排）" % (where, label, text.strip()[:30]))
@@ -847,15 +962,13 @@ def main():
         f = field_lines(g["body"])
         for name in SEG_FIELDS:
             if name not in f:
-                fails.append("%s 缺「%s」字段" % (where, name))
-        pr = prompt_text(f)
-        seg_prompt_all.append(pr)
-        check_segment_detail(pr, where, fails)
-        check_segment_voice(f, pr, where, fails)
-        check_segment_gaze(pr, where, fails)
-        check_no_timecode(pr, where, fails)
-        if not pr.splitlines() or "约束" not in pr.splitlines()[0]:
-            fails.append("%s 提示词第一行不是固定约束行" % where)
+                fails.append("%s 缺「%s」元数据字段" % (where, name))
+        sec = check_segment_sections(g["body"], where, fails, warns)
+        detail = sec.get("detailed_description", "")
+        seg_prompt_all.append(detail)
+        check_segment_dialogue(sec, where, fails)
+        check_segment_music(sec, where, fails)
+        check_segment_gaze(sec, where, fails)
         dl = re.sub(r"[^\d]", "", f.get("时长", "").split("\n")[0])
         declared = int(dl) if dl else None
         if declared is None:
@@ -864,20 +977,18 @@ def main():
             if not (4 <= declared <= 15):
                 fails.append("%s 时长 %d 秒不在 4–15 区间" % (where, declared))
             seg_durs.append(declared)
-        check_slots(f.get("参考图", "") + "\n" + pr, where, fails, notes)
-        allow_music = "用户指定" in f.get("声音", "")
-        scan_music(pr, where + " 提示词", fails, require_off=not allow_music, allow=allow_music)
-        scan_music(f.get("声音", ""), where + " 声音栏", fails, require_off=False, allow=allow_music)
-        landing = f.get("台词落点", "").strip()
+            check_official_timecodes(detail, declared, where, fails)
+        check_slots(f.get("参考图", "") + "\n" + g["body"], where, fails, notes)
+        # 说话人索引：只写 ①②③ 顺序与 (Sx)，不抄原文
+        landing = f.get("说话人", "").strip()
         if landing and landing != "无":
             if re.search(r"[\u4e00-\u9fa5]{6,}", landing):
-                fails.append("%s「台词落点」抄了原文，只该写说话顺序与说话人" % where)
-        check_multi_speaker(pr, where, fails)
-        check_line_order(landing, where, "台词落点", fails)
+                fails.append("%s「说话人」抄了原文，只该写说话顺序与 (Sx) 编号" % where)
+        check_line_order(landing, where, "说话人", fails)
         # 转场标注：跨场次切点
         scene_txt = f.get("场景与轴线", "")
-        if ("转场" in scene_txt) and not re.search(r"切[:：]\s*转场", pr):
-            fails.append("%s 声明了转场，但提示词切点没写「切：转场到…」" % where)
+        if ("转场" in scene_txt) and not re.search(r"hard cut|cuts to|transitions to", detail, re.I):
+            fails.append("%s 声明了转场，但 detailed_description 切点没写 hard cut / cuts to（R19）" % where)
 
     # ---------- 跨文件 ----------
     board_total = sum(v for v in shot_durs.values() if v)
