@@ -31,7 +31,7 @@ SEG_FIELDS = ["时长", "场景与轴线", "参考图", "声音", "台词落点"
 MONO_WORDS = ("内心", "独白", "VO", "画外音")
 MOUTH_CONFLICT = ("嘴唇开始动", "说完合上", "嘴唇开合", "嘴唇张开", "嘴巴张开")
 MOUTH_CLAUSE = "其他角色嘴唇闭合"
-SPK_LINE = re.compile(r"^\s*(\d{1,2}):(\d{2})\s*(?!起幅\s*[：:]|切\s*[：:]|转场\s*[：:])([^\s：:（]{1,8})(?:（[^）]*）)?[：:]\s*(.+)$", re.M)
+SPK_LINE = re.compile(r"^\s*(\d{1,2}):(\d{2})\s*(?!起幅\s*[：:]|切\s*[：:]|转场\s*[：:]|镜头|画面)([^\s：:（]{1,8})(?:（[^）]*）)?[：:]\s*(.+)$", re.M)
 LINE_ENTRY = re.compile(r"(\d{1,2}):(\d{2})\s*([^\s；;，,、]{1,8})")
 MUSIC_RE = re.compile(r"(BGM|bgm|背景音乐|背景纯音乐|纯音乐|垫乐|配乐)")
 SLOT = re.compile(r"@图片\s*(\d+)")
@@ -72,8 +72,8 @@ GAZE_RE = re.compile(
     r"|第一人称主观|主观视角|视线[^，。；\n]{0,6}镜头)"
 )
 TIME_LINE = re.compile(r"^\s*(\d{1,2}):(\d{2})\s")
-DIALOGUE_LINE = re.compile(r"^\s*\d{1,2}:\d{2}\s*(?!起幅\s*[：:]|切\s*[：:]|转场\s*[：:])[^\s：:（]{1,8}(?:（[^）]*）)?[：:]")
-VOICE_LABEL = re.compile(r"^\s*\d{1,2}:\d{2}\s*(?!起幅\s*[：:]|切\s*[：:]|转场\s*[：:])[^\s：:（]{1,8}（([^）]{4,})）\s*[：:]")
+DIALOGUE_LINE = re.compile(r"^\s*\d{1,2}:\d{2}\s*(?!起幅\s*[：:]|切\s*[：:]|转场\s*[：:]|镜头|画面)[^\s：:（]{1,8}(?:（[^）]*）)?[：:]")
+VOICE_LABEL = re.compile(r"^\s*\d{1,2}:\d{2}\s*(?!起幅\s*[：:]|切\s*[：:]|转场\s*[：:]|镜头|画面)[^\s：:（]{1,8}（([^）]{4,})）\s*[：:]")
 VOICE_PARAM = re.compile(r"(语速|音量|气声|咬字|尾音|停顿|喉部|鼻腔|气息)")
 EMO_WORD = re.compile(r"(情绪|怒|怕|慌|急|冷|喜|悲|讽|疲惫|压抑|平静|平常|常态|冷静|温和|无奈|疑惑|戒备|试探|敷衍|认真|紧张|心虚|克制|兴奋|恐惧|委屈|不甘|[一二三四五六七八九十]成)")
 BODY_RE = re.compile(r"(眉|眼|嘴|唇|下颌|下巴|喉|呼吸|手|指|肩|背|腰|膝|脚|腿|臂|腕|掌|视线|目光|重心|肌肉|咬肌|瞳孔|眼睑)")
@@ -81,13 +81,13 @@ CJK = re.compile(r"[\u4e00-\u9fa5]")
 
 
 def check_segment_detail(pr, where, fails):
-    """R51：分段提示词不是分镜缩写。逐秒行过短、缺起幅即 FAIL。"""
+    """R51/R53：分段提示词不是分镜缩写。逐秒行过短、没有 0:00 开头即 FAIL。"""
     lines = [l.strip() for l in pr.splitlines() if TIME_LINE.match(l.strip())]
     if not lines:
         return 0
     bad = 0
-    if not any("起幅" in l for l in lines):
-        fails.append("%s 分段提示词缺「0:00 起幅」（R51 起幅不能省）" % where)
+    if not any(l.startswith("0:00") for l in lines):
+        fails.append("%s 分段提示词没有从「0:00」开始（R53 白话从镜头一开始写）" % where)
         bad += 1
     short = 0
     for l in lines:
