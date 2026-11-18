@@ -18,8 +18,9 @@
 ## 它和我改了什么
 
 - **时间码分两层（R13–R15／R18／R53）**：**分镜提示词不写时间码**，每镜从「起幅：」写起、按动作顺序连续写，不写 `0:00`、不按秒拆行；**分段提示词按官方 Ref2VA**，首镜 `[Shot 1]` 不写时间码，从 `[Shot 2]` 起写 `At MM:SS.mmm,`，切点严格递增且小于段长。镜长与段长只写在字段里的「镜长 N 秒」「时长 N 秒」。`check_rule.py` 对分镜查 `check_no_timecode`，对分段查 `check_official_timecodes`，两边分开判。
-- **分段改按官方 Ref2VA 六段式（R20／R20.3／R53）**：所有分段一律按 `subject_definitions` → `summary` → `retention_analysis` → `detailed_description` → `overall_soundscape` → `non_diegetic_music` 六段落盘，字段写成 `subject_definitions:` 这种字段行，**六段之前不许再加中文约束段**。六段正文英文；台词、歌词、画面可见文字、以及本项目的图片中文名保留原语言并包进 `<d>[Language] 原文</d>`。`subject_definitions` 每条 `<Subject N>` 写成 `<Subject N>（图片名：方源）`，`summary`／`retention_analysis`／`detailed_description` 正文一律写图片中文名、不写裸 `<Subject N>`／`<Picture N>`，标签只留定义行与元数据「标签映射」。`summary` 以方括号任务类型开头（如 `[reference generation]`）；人物、场景、道具的参考图只作主体来源时折进 `<Subject N>`，不单开 `<Picture N>`；只有首帧、尾帧、关键帧、构图锚点、故事板才单独定义 `<Picture N>`；没有视频输入不写 `video continuation`、不定义 `<Video N>`。`detailed_description` 通常 350–500 英文词，台词密集段优先排满发声时间。
-- **分段里人物绝不对视镜头（R52）**：镜头可以推近拍脸，也可以拍眼睛、给眼睛特写；但人物的眼睛不许看镜头，眼球、瞳孔、目光不许对准镜头。每个写到脸或特写的句子必须写「视线落在…」（对手的手／脸、门缝、剑柄、桌面、地面血、远处窗口）。`detailed_description` 风格句后固定写英文：`The camera observes as an outside witness. No character looks into the lens; every eyeline stays on an in-scene object, opponent, or off-screen story target, while the camera may photograph faces and eyes.` 禁写看镜头、看向／望向／对着／盯住／锁住／找／迎／追／目视／注视镜头、看向观众；`check_rule.py` 的 `check_segment_gaze` 查这句英文，`GAZE_RE` 查看镜头措辞，但「镜头可拍眼睛」「人物眼睛不对镜头」不会误判。
+- **分段改按官方 Ref2VA 六段式（R20／R20.3／R53／R54）**：所有分段一律按 `subject_definitions` → `summary` → `retention_analysis` → `detailed_description` → `overall_soundscape` → `non_diegetic_music` 六段落盘，字段写成 `subject_definitions:` 这种字段行，**六段之前不许再加中文约束段**。六段正文英文；台词、歌词、画面可见文字、以及本项目的图片中文名保留原语言并包进 `<d>[Language] 原文</d>`。`subject_definitions` 每条 `<Subject N>` 写成 `<Subject N>（图片名：方源）`，`summary`／`detailed_description` 正文一律写图片中文名、不写裸 `<Subject N>`／`<Picture N>`；`retention_analysis` 行首按 R54 写 `<Subject N>（图片名：…）`，这是唯一例外；标签只留定义行、`retention_analysis` 与元数据「标签映射」。`summary` 以方括号任务类型开头（如 `[reference generation]`）；人物、场景、道具的参考图只作主体来源时折进 `<Subject N>`，不单开 `<Picture N>`；只有首帧、尾帧、关键帧、构图锚点、故事板才单独定义 `<Picture N>`；没有视频输入不写 `video continuation`、不定义 `<Video N>`。`detailed_description` 通常 350–500 英文词，台词密集段优先排满发声时间。
+- **参考图只继承身份，不继承正脸与视线（R54）**：参考图同时带身份（五官、发型、服装、体态）与画面（取景角度、头部朝向、视线、姿态），写作时只继承身份，画面信息由分镜重新指定。每个 `<Subject N>` 定义句写死 `The reference supplies facial identity, hair and costume only; pose, head angle and eyeline follow the shot description.` 并预声明主朝向；`detailed_description` 同时写「不看镜头」与「不复制参考图正面取向」两句；近景/中近景写 `pupils clearly off the lens axis`；机位优先越肩／三分之二侧／侧面／背面，禁正面平视，群像正面受光不超过一张，三分镜正面机位不超过一个；同一主体参考图≤3 张且上传顺序与编号一致；`retention_analysis` 加 `head angle and eyeline are reblocked...`，等级只用 `fully_preserved`／`weak_reference`。
+- **分段里人物绝不对视镜头（R52／R54）**：镜头可以推近拍脸，也可以拍眼睛、给眼睛特写；但人物的眼睛不许看镜头，眼球、瞳孔、目光不许对准镜头。每个写到脸或特写的句子必须写「视线落在…」（对手的手／脸、门缝、剑柄、桌面、地面血、远处窗口）。`detailed_description` 风格句后固定写英文：`The camera observes as an outside witness; no subject looks into the lens, and no subject adopts the frontal gaze of the reference sheets. Every face is shown in profile or three-quarter view, with each eyeline fixed on an in-scene object, an opponent, or an off-screen story target.` 禁写看镜头、看向／望向／对着／盯住／锁住／找／迎／追／目视／注视镜头、看向观众；`check_rule.py` 的 `check_segment_gaze` 同时查双禁令与瞳孔方向，`GAZE_RE` 查看镜头措辞，但「镜头可拍眼睛」「人物眼睛不对镜头」不会误判。
 - **分段提示词不是分镜缩写（R51）**：`分段视频提示词.md` 是直接贴给 H3 的成稿，不许只剩「切镜＋台词」。分镜里的动作、动作先后、表情、自然规律、声音，必须在分段对应动作写得更具体：动作到关节／肌肉／承重，表情到眉／眼／嘴／下颌／喉／呼吸，视线有落点，道具写位移；同一画面多人各写各的，不许用「众人／群雄」一句带过。台词统一写 `方源(S1) says <d>[Chinese] 原文</d>`（说话人挂图片中文名），基础音色全片固定，情绪只改力度、速度、气息与尾音，不管多怒多怕，音色不许大幅变化；独白写 `says in an off-screen voiceover`，并在 `<d>` 后紧跟 `his/her lips remain completely closed`。环境声与动作声写进 `overall_soundscape`，配乐只放 `non_diegetic_music`（默认 `N/A`）。
 - **只有镜头去找人物，没有人物去找镜头（R49）**：机位在画外主动观察，可以推近、拉远、绕到侧面、从背后拍；人物不知道镜头在哪，也不因镜头出现改动作。人物视野不得与镜头发生关系——不直视／看向／望向／对着／盯住／锁住／找／迎／追镜头，不朝镜头演、不对镜头笑、不往镜头撞、不把脸转向镜头；每个人视线必须有落点（对手的手、门缝、剑柄、桌面、远处窗口、地面血迹）。分镜三层与分段动作句都守，资产图除外。
 - **分镜提示词按动作顺序写细（R50）**：每镜从「起幅：」起连续写，不写时间码；每个动作句写全七件事——谁＋锚点方位＋朝向与机位景别＋关节肌肉承重＋情绪与表情肌肉＋视线落点＋道具/光。台词单独占行，插在说话发生的那一步之后；不许「他看着」「她笑了」「气氛紧张」；任一动作句少于 15 个汉字就退回重写，`check_rule.py` 会报「提示词过短」。分段层按官方 Ref2VA，首镜无时间码、后续镜 `At MM:SS.mmm`，详细规则见第 20／21 条。
@@ -57,10 +58,11 @@
 
 ```
 阿良的分镜制作规则/
-├── SKILL.md                     # 总控：R1–R53 + 流程 + 21 题材速查
+├── SKILL.md                     # 总控：R1–R54 + 流程 + 21 题材速查
 ├── references/
-│   ├── 制作规则原文.md           # 主规则原文（53 条，R1–R53）
+│   ├── 制作规则原文.md           # 主规则原文（54 条，R1–R54）
 │   ├── Ref2VA官方规范.md         # 官方 MiniMax-H3 Ref2VA 六段式硬规范与本项目映射
+│   ├── 视线与朝向控制规范.md     # R54 参考图只继承身份、不继承正脸与视线
 │   ├── H3基础约束.md             # 基础层：H3 技术边界与六段转写
 │   ├── 人物资产规范.md           # 人物 A／B 资产 16 章条目清单
 │   ├── 场景资产规范.md           # 场景十章目录（01–04 A、05–10 B）
@@ -99,7 +101,7 @@ python scripts/check_rule.py --project <项目目录> --ep EP001
 
 ## 题材：四大类、21 个
 
-小说一到手，先在这 21 个题材里选一个（R38）；只加不改，R1–R50 一条没动。
+小说一到手，先在这 21 个题材里选一个（R38）；只加不改，R1–R53 一条没动，R54 只增视线与朝向控制。
 
 **光影（R40）**：只用原文里有的光影。原文出现光位／明暗／影子／逆光／窗光／月光／烛火／灯光／火光／闪电／屏幕光／色温／光变，剧本另起 `[LIGHT] 光源｜方向｜强度／色温｜落点｜变化` 一行，分镜写进「自然规律」与「提示词」，**分段提示词也写**（「场景与轴线」写本节光位与承接、「提示词」按动作顺序写光、起幅先写光位），动作里写人穿过光区的明暗变化；原文没写的场不补光，不加夕阳、霓虹、氛围光，也不许用光影遮脸遮嘴。
 

@@ -86,7 +86,7 @@
 - 每段元数据加一行「标签映射」，把本段用到的槽号与标签写清，例：`@C01→<Subject 1>（方源）；@S01→<Subject 2>（荒山巅石台）；@图片 9→荒山巅石台全景图`。
 - **本项目落地：图片中文名**（2026-11-18 增补，优先于官方示例里的裸标签写法）
   - 每条 `<Subject N>` 定义必须写成 `<Subject N>（图片名：方源） is ...`；每条 `<Picture N>` 写成 `<Picture N>（图片名：荒山巅石台全景图） is ...`。名字取自资产表，不许用「图1」「素材A」。
-  - `summary`、`retention_analysis`、`detailed_description` 里引用人、场景、道具、首帧、尾帧、构图锚点，**一律写图片中文名**，不再出现裸 `<Subject N>`／`<Picture N>`。标签只保留在定义行与「标签映射」。
+  - `summary`、`detailed_description` 里引用人、场景、道具、首帧、尾帧、构图锚点，**一律写图片中文名**，不再出现裸 `<Subject N>`／`<Picture N>`；`retention_analysis` 行首按 R54 写 `<Subject N>（图片名：中文名）`，这是唯一例外。标签只保留在定义行、`retention_analysis` 与「标签映射」。
   - 同一段同一主体只用一个名字，跨镜不换称呼；两个角色同名时用资产编号区分，例 `方源（C01）`、`方源（C02）`。
   - 说话人写成 `方源(S1)`，不写 `<Subject 1> (S1)`。
   - 主体名与图片名分开：人物主体名 `方源`，人物图片名 `方源全身图`／`方源面部图`；场景主体名 `荒山巅石台`，场景图片名 `荒山巅石台全景图`。叙事用主体名，只有明确要挂某张帧／构图图时才写图片名。
@@ -183,7 +183,7 @@ A red neon sign reading "营业中" glows above the doorway.
 
 | 旧约束 | 官方六段里的落法 |
 |---|---|
-| 人物不看镜头，只有镜头找人 | 在 `detailed_description` 风格句后写：`The camera observes as an outside witness. No character looks into the lens; every eyeline stays on an in-scene object, opponent, or off-screen story target, while the camera may photograph faces and eyes.` |
+| 人物不看镜头，只有镜头找人 | 在 `detailed_description` 风格句后写：`The camera observes as an outside witness; no subject looks into the lens, and no subject adopts the frontal gaze of the reference sheets. Every face is shown in profile or three-quarter view, with each eyeline fixed on an in-scene object, an opponent, or an off-screen story target.` |
 | 同一时刻只有说话的人嘴唇动 | 有对话的段写：`Only the character who is speaking moves their lips; every other character keeps their lips closed and makes no lip-sync movement.` |
 | 台词只念一遍、不复述 | 台词只出现一次 `<d>`；不复述、不回环、不叠句 |
 | 内心独白不张嘴 | 用 `says in an off-screen voiceover` ＋ `lips remain completely closed` ＋ 气声走鼻腔与齿缝 |
@@ -192,6 +192,7 @@ A red neon sign reading "营业中" glows above the doorway.
 | 原文有光影才写 | 在对应镜头写光源、方向、强度／色温、落点、变化阶段；原文没写就不补 |
 | 幻想特效写起中收 | 在特效出现镜头写形态、光源、起始、发展、收束，跨镜保持同一形态与亮度 |
 | 第三视角、不拍人物主观 | 用 `outside witness` 句；POV 只有剧本明确要求才写 |
+| 参考图只继承身份、不继承正脸与视线 | `subject_definitions` 每个主体定义句追加身份限定句与主朝向；`retention_analysis` 每条写朝向重排声明；机位优先侧向，禁正面平视（R54） |
 
 ---
 
@@ -205,7 +206,8 @@ A red neon sign reading "营业中" glows above the doorway.
 6. 说话人 `(Sx)` 稳定；每句台词都在 `<d>[Language] 原文</d>` 内；画外音写了 `off-screen voiceover` 与闭唇。
 7. `overall_soundscape` 1–4 句，不重复台词与画内音乐。
 8. `non_diegetic_music` 为 `N/A` 或用户指定配乐；没有主动加 BGM。
-9. 英文正文里没有残留中文（`<d>`、画面可见引文与 R20.3 图片中文名除外）；正文没有裸 `<Subject N>`／`<Picture N>`。
+9. 英文正文里没有残留中文（`<d>`、画面可见引文与 R20.3 图片中文名除外）；正文没有裸 `<Subject N>`／`<Picture N>`，但 `retention_analysis` 行首按 R54 写 `<Subject N>（图片名：…）`。
 10. 字数落在 350–500 英文词左右；台词密集段以排满发声时间为准。
 11. 时间码、镜头数、切点数与分镜逐镜对得上；段总时长与元数据一致。
 12. `check_rule.py` 的 Ref2VA 机械项全 PASS，再走人工核对。
+13. **R54 视线与朝向**：每个主体定义句有身份限定句与主朝向；`retention_analysis` 带朝向重排声明；`detailed_description` 双禁令齐全；每个角色有具体注视对象，近景/中近景有 `pupils` 离轴方向；正面或近正面机位不超过三分之一；同一主体参考图不超过三张且上传顺序与编号一致。

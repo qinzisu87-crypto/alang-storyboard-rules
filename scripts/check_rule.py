@@ -166,6 +166,20 @@ def check_segment_sections(body, where, fails, warns):
             fails.append("%s 定义了 <Subject %s>（图片名：%s），但 detailed_description 没用这个名字（R20.3）"
                          % (where, num, name))
 
+    for line in subj_def.splitlines():
+        st = line.strip()
+        if not re.match(r"<Subject\s+\d+>", st):
+            continue
+        if "no visual reference" in st.lower():
+            continue
+        if "The reference supplies" not in st or "only;" not in st:
+            fails.append("%s 主体定义缺「参考图只提供身份」限定句（R54）：%s" % (where, st[:60]))
+        if "pose, head angle and eyeline follow the shot description" not in st \
+                and "camera angle and view direction follow the shot description" not in st:
+            fails.append("%s 主体定义缺「姿态/朝向/视线以分镜为准」限定句（R54）：%s" % (where, st[:60]))
+        if "main orientation" not in st.lower():
+            fails.append("%s 主体定义缺本段主朝向预声明（R54）：%s" % (where, st[:60]))
+
     # <Picture N> 只允许当首帧/尾帧/关键帧/构图锚点/故事板；人物三视图、场景图只作主体来源
     for line in subj_def.splitlines():
         st = line.strip()
@@ -198,6 +212,14 @@ def check_segment_sections(body, where, fails, warns):
                 bad += 1
                 if bad <= 3:
                     fails.append("%s retention_analysis 缺合法保留度标记：%s（R20）" % (where, st[:60]))
+            if st.startswith("<Subject"):
+                if not re.match(r"<Subject\s+\d+>\s*[（(]\s*图片名[：:]", st):
+                    fails.append("%s retention_analysis 主体条目不是以 <Subject N>（图片名：…） 开头（R54）：%s" % (where, st[:60]))
+                if "head angle and eyeline are reblocked" not in st.lower() \
+                        or "reference frontal orientation is not preserved" not in st.lower():
+                    fails.append("%s retention_analysis 主体条目缺朝向重排声明（R54）：%s" % (where, st[:60]))
+                if "partially_preserved" in st or "attribute_transfer" in st:
+                    fails.append("%s retention_analysis 用了 R54 不允许的档位；只许 fully_preserved／weak_reference：%s" % (where, st[:60]))
         if bad > 3:
             fails.append("%s retention_analysis 另有 %d 条缺合法标记（R20）" % (where, bad - 3))
 
@@ -295,11 +317,20 @@ def check_segment_music(sec, where, fails):
 
 
 def check_segment_gaze(sec, where, fails):
-    """R52：detailed_description 风格句后必须有英文「镜头是旁观者、人物不看镜头」硬句。"""
+    """R52/R54：风格句必须同时写「镜头是旁观者、人物不看镜头」与「不复制参考图正面取向」。"""
     detail = sec.get("detailed_description", "")
     low = detail.lower()
-    if "outside witness" not in low or "no character looks into the lens" not in low:
-        fails.append("%s detailed_description 缺英文不看镜头硬句（outside witness / No character looks into the lens，R52）" % where)
+    has_lens_ban = "no subject looks into the lens" in low or "no character looks into the lens" in low
+    has_frontal_ban = "no subject adopts the frontal gaze of the reference sheets" in low
+    has_side_view = "profile or three-quarter view" in low
+    if "outside witness" not in low or not has_lens_ban:
+        fails.append("%s detailed_description 缺英文不看镜头硬句（outside witness / no subject looks into the lens，R52／R54）" % where)
+        return 1
+    if not has_frontal_ban or not has_side_view:
+        fails.append("%s detailed_description 缺「不复制参考图正面取向 + 侧脸/三分之二侧」硬句（R54）" % where)
+        return 1
+    if "pupil" not in low:
+        fails.append("%s detailed_description 没有任何瞳孔方向描述（R54 近景/中近景需 pupils 离轴）" % where)
         return 1
     return 0
 
