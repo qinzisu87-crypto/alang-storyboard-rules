@@ -233,7 +233,7 @@ def check_official_timecodes(detail, declared, where, fails):
 
 
 def check_segment_dialogue(sec, where, fails):
-    """R51/R53：台词挂 (Sx) 说话人编号并包进 <d>[Language] 原文</d>；独白写不张嘴。"""
+    """R51/R53：台词挂 (Sx) 说话人编号并包进 <d>[Language] 原文</d>；多人同场只许说话人动嘴。"""
     detail = sec.get("detailed_description", "")
     if not detail:
         return
@@ -243,6 +243,8 @@ def check_segment_dialogue(sec, where, fails):
         fails.append("%s detailed_description 有 <d> 台词但没挂 (Sx) 说话人编号（R20.2）" % where)
     if speakers and not d_tags:
         fails.append("%s detailed_description 有 (Sx) 编号但台词没包进 <d>[Language] 原文</d>（R53）" % where)
+    if len(set(speakers)) >= 2 and "only the character who is speaking moves their lips" not in detail.lower():
+        fails.append("%s 多人对话，detailed_description 没写「Only the character who is speaking moves their lips…」（R34 一人说时别人嘴不动）" % where)
     for line in detail.splitlines():
         if RE_DIALOG_TAG.search(line):
             continue
@@ -621,16 +623,6 @@ STYLE_TAIL = re.compile(r"画风\s*按\s*(REF-\d{3})\s*[：:]")
 STYLE_ANY = re.compile(r"(REF-\d{3})")
 
 
-def check_multi_speaker(prompt, where, fails):
-    """R34：多人同场要排队说；一人说时别人嘴不动。"""
-    names = [DIALOGUE_LINE.match(l.strip()).group(0).split("（")[0].rstrip("：:") 
-             for l in prompt.splitlines() if DIALOGUE_LINE.match(l.strip())]
-    if len(set(names)) >= 2:
-        first = prompt.splitlines()[0] if prompt.splitlines() else ""
-        if MOUTH_CLAUSE not in first:
-            fails.append("%s 多人对话，段首约束行没写「%s」（R34）" % (where, MOUTH_CLAUSE))
-
-
 def check_line_order(field, where, label, fails):
     """R34：台词索引／说话人索引按 ①②③ 排，不许写时间码。"""
     text = field or ""
@@ -929,7 +921,6 @@ def main():
                 fails.append("%s「台词」栏抄了原文，只该写说话顺序与说话人" % where)
             if not re.search(r"[①②③④⑤⑥⑦⑧⑨]", tl):
                 fails.append("%s「台词」栏缺说话顺序（格式 ① 周野 → ② 小赵）" % where)
-        check_multi_speaker(pr, where, fails)
         check_line_order(tl, where, "台词", fails)
         # 独白
         sound = f.get("声音", "")
