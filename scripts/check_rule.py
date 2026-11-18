@@ -28,6 +28,8 @@ RE_SEG_SECTION = re.compile(r"^([a-z_]+)\s*:\s*$", re.M)
 RE_SHOT_TAG = re.compile(r"\[Shot\s+\d+\]")
 RE_SUBJECT = re.compile(r"<Subject\s+\d+>")
 RE_PICTURE = re.compile(r"<Picture\s+\d+>")
+RE_SUBJECT_NAME = re.compile(r"<Subject\s+(\d+)>\s*[（(]\s*图片名[：:]\s*([^）)\n]+?)\s*[）)]")
+RE_PICTURE_NAME = re.compile(r"<Picture\s+(\d+)>\s*[（(]\s*图片名[：:]\s*([^）)\n]+?)\s*[）)]")
 RE_SPEAKER = re.compile(r"\(S\d+(?:,[^)]*)?\)")
 RE_DIALOG_TAG = re.compile(r"<d>\s*\[[^\]]+\][^<]*</d>")
 TIME_CODE_RE = re.compile(r"(?<!\d)(\d{1,2}):(\d{2})(?!\d)")
@@ -139,11 +141,30 @@ def check_segment_sections(body, where, fails, warns):
         fails.append("%s detailed_description 没有任何表情肌／身体／视线细节（R51 不是分镜缩写）" % where)
 
     subj_def = sec["subject_definitions"]
-    subj_used = set(RE_SUBJECT.findall(detail))
-    subj_decl = set(RE_SUBJECT.findall(subj_def))
-    if subj_decl and not subj_used:
-        fails.append("%s subject_definitions 定义了 %s，但 detailed_description 没有引用 <Subject N>（R53 标签一致）"
-                     % (where, "、".join(sorted(subj_decl))))
+    subj_nums = set(re.findall(r"<Subject\s+(\d+)>", subj_def))
+    subj_names = {m.group(1): m.group(2).strip() for m in RE_SUBJECT_NAME.finditer(subj_def)}
+    missing_name = [num for num in sorted(subj_nums) if num not in subj_names]
+    if missing_name:
+        fails.append("%s 这些主体定义没写「（图片名：中文名）」：%s（R20.3）"
+                     % (where, "、".join("<Subject %s>" % n for n in missing_name)))
+    pic_nums = set(re.findall(r"<Picture\s+(\d+)>", subj_def))
+    pic_names = {m.group(1): m.group(2).strip() for m in RE_PICTURE_NAME.finditer(subj_def)}
+    missing_pic = [num for num in sorted(pic_nums) if num not in pic_names]
+    if missing_pic:
+        fails.append("%s 这些帧/构图定义没写「（图片名：中文名）」：%s（R20.3）"
+                     % (where, "、".join("<Picture %s>" % n for n in missing_pic)))
+    for num in sorted(pic_nums):
+        name = pic_names.get(num)
+        if name and name not in detail:
+            fails.append("%s 定义了 <Picture %s>（图片名：%s），但 detailed_description 没用这个名字（R20.3）"
+                         % (where, num, name))
+    if RE_SUBJECT.findall(detail) or RE_PICTURE.findall(detail):
+        fails.append("%s 正文仍有裸 <Subject N>／<Picture N>；六段正文一律写图片中文名（R20.3）" % where)
+    for num in sorted(subj_nums):
+        name = subj_names.get(num)
+        if name and name not in detail:
+            fails.append("%s 定义了 <Subject %s>（图片名：%s），但 detailed_description 没用这个名字（R20.3）"
+                         % (where, num, name))
 
     # <Picture N> 只允许当首帧/尾帧/关键帧/构图锚点/故事板；人物三视图、场景图只作主体来源
     for line in subj_def.splitlines():
@@ -233,10 +254,11 @@ def check_official_timecodes(detail, declared, where, fails):
 
 
 def check_segment_dialogue(sec, where, fails):
-    """R51/R53：台词挂 (Sx) 说话人编号并包进 <d>[Language] 原文</d>；多人同场只许说话人动嘴。"""
+    """R51/R53/R20.3：台词挂图片中文名与 (Sx)；正文中文名合法、其他叙述英文；多人同场只许说话人动嘴。"""
     detail = sec.get("detailed_description", "")
     if not detail:
         return
+    names = [m.group(2).strip() for m in RE_SUBJECT_NAME.finditer(sec.get("subject_definitions", ""))]
     d_tags = RE_DIALOG_TAG.findall(detail)
     speakers = RE_SPEAKER.findall(detail)
     if d_tags and not speakers:
@@ -248,8 +270,11 @@ def check_segment_dialogue(sec, where, fails):
     for line in detail.splitlines():
         if RE_DIALOG_TAG.search(line):
             continue
-        if len(CJK.findall(line)) >= 6:
-            fails.append("%s detailed_description 叙述句出现中文（除 <d> 内台词与画内可见引文外正文应为英文，R53）：%s"
+        clean = line
+        for name in names:
+            clean = clean.replace(name, "")
+        if len(CJK.findall(clean)) >= 6:
+            fails.append("%s detailed_description 叙述句出现中文（除 <d> 内台词、画内可见引文与图片中文名外正文应为英文，R53）：%s"
                          % (where, line.strip()[:40]))
             break
     if "says in an off-screen voiceover" in detail.lower() and "lips remain completely closed" not in detail:
@@ -346,11 +371,18 @@ def split_blocks(text, head_re):
 
 
 def field_lines(body):
-    """返回 {字段名: 该字段所在行之后到下一个字段之前的原文}"""
+    """返回 {字段名: 该字段所在行之后到下一个字段之前的原文}。
+    分段六段是裸字段行（subject_definitions: 等，无 `- ` 前缀），
+    元数据字段取值必须在第一个裸字段行处截断，否则会把六段正文吞进元数据。"""
     hits = list(re.finditer(r"^-\s*(%s)\s*[:：]" % "|".join(SHOT_FIELDS + SEG_FIELDS), body, re.M))
+    bare = list(re.finditer(r"^[a-z_]+\s*:\s*$", body, re.M))
     d = {}
     for i, h in enumerate(hits):
         end = hits[i + 1].start() if i + 1 < len(hits) else len(body)
+        for b in bare:
+            if b.start() > h.end():
+                end = min(end, b.start())
+                break
         d.setdefault(h.group(1), body[h.end():end])
     return d
 

@@ -14,7 +14,7 @@
 1. **六段，顺序固定，一段不能少**：`subject_definitions` → `summary` → `retention_analysis` → `detailed_description` → `overall_soundscape` → `non_diegetic_music`。
 2. **六段之前不许再加中文约束段**。老版段首那条「约束，台词只念一遍……」不再贴进提示词；把它翻成英文写进 `detailed_description` 的开头（见第八节）。
 3. **字段名照官方写**：每段用 `subject_definitions:` 这样的字段行，不用 Markdown `###`，不加编号，不加多余小标题。
-4. **正文英文**。六段的叙述句一律英文；只有 `<d>` 内的台词、歌词，以及画面里真实可见的文字保留原语言。
+4. **正文英文**。六段的叙述句一律英文；只有 `<d>` 内的台词、歌词、画面里真实可见的文字，以及 R20.3 的图片中文名保留原语言。
 5. **时长 4–15 整数秒，和元数据「时长」一致**。`detailed_description` 里所有 `[Shot N]` 的切点必须落在该段时长之内。
 6. **首镜不写时间码**。`[Shot 1]` 后面直接写内容；从 `[Shot 2]` 起写 `At MM:SS.mmm,`，切点严格递增（毫秒三位，如 `00:03.500`）。
 7. **`detailed_description` 通常 350–500 英文词**。台词密集段优先把发声时间排满，不机械凑字数；单镜不因为镜头少就写短。
@@ -61,14 +61,14 @@
 | `<Subject N>` | 可复用的可见内容：人、动物、物件、场景、服装、道具、界面、特效、风格、动作、表情、姿态 | `@C01` 人物 → `<Subject N>`；`@S01` 场景 → `<Subject N>`；`@P01` 道具 → `<Subject N>`；同一人物跨段复用同一编号 |
 | `<Picture N>` | 真正当首帧、关键帧、尾帧、改过的关键帧、构图锚点或故事板参考的图片 | `@图片 N` 只有满足这几种用途才单开 `<Picture N>`；只用来定义人物长相、服装、场景材质的图，写进对应 `<Subject N>` 定义里，不单开 |
 | `<Video N>` | 剪辑源、续接起点、整条视频的时间结构／运镜／节奏参考 | 只有真的挂了视频才写；`<Video N>` 与 `<Audio N>` 各自独立编号，不按同一文件强行配对 |
-| `<Audio N>` | 独立音频，或参考视频里启用的同步音轨：音色、台词、歌词、音效、节拍、连续性 | 有音频参考才写；定义到具体说话人时写成 `<Audio 1> is the voice-timbre reference for <Subject 1> (S1).` |
+| `<Audio N>` | 独立音频，或参考视频里启用的同步音轨：音色、台词、歌词、音效、节拍、连续性 | 有音频参考才写；定义到具体说话人时写成 `<Audio 1> is the voice-timbre reference for 方源(S1).` |
 
 ### 4.1 人物图不能一律当 `<Picture>`
 
 官方明确：图片只用来定义人物、场景、服装、风格时，**不创建独立 `<Picture N>` 条目**，而是写进 `<Subject N>` 定义：
 
 ```text
-<Subject 1> is Zhou Ye, the man whose face and build come from <Picture 1> and <Picture 2>, with close-cropped dark hair, a broken left eyebrow, a grey hoodie under a worn jacket, and thin shoulders.
+<Subject 1>（图片名：周野） is Zhou Ye, the man whose face and build come from 周野全身图 and 周野面部图, with close-cropped dark hair, a broken left eyebrow, a grey hoodie under a worn jacket, and thin shoulders.
 ```
 
 只有这张图真的当首帧／尾帧／构图锚点时才单开：
@@ -83,8 +83,15 @@
 
 - `<Subject N>`、`<Picture N>`、`<Video N>`、`<Audio N>` 四类各自从 1 开始，互不占号。
 - 同一集内编号一经分配就固定，跨段沿用，不重排、不回收。
-- 每段元数据加一行「标签映射」，把本段用到的槽号与标签写清，例：`@C01→<Subject 1>；@S01→<Subject 2>；@图片 9→<Picture 1>`。
-- `detailed_description` 里第一次出现某标签时，把它指代的特征、画面位置、当前动作写清；后文只复用标签，不重新定义。
+- 每段元数据加一行「标签映射」，把本段用到的槽号与标签写清，例：`@C01→<Subject 1>（方源）；@S01→<Subject 2>（荒山巅石台）；@图片 9→荒山巅石台全景图`。
+- **本项目落地：图片中文名**（2026-11-18 增补，优先于官方示例里的裸标签写法）
+  - 每条 `<Subject N>` 定义必须写成 `<Subject N>（图片名：方源） is ...`；每条 `<Picture N>` 写成 `<Picture N>（图片名：荒山巅石台全景图） is ...`。名字取自资产表，不许用「图1」「素材A」。
+  - `summary`、`retention_analysis`、`detailed_description` 里引用人、场景、道具、首帧、尾帧、构图锚点，**一律写图片中文名**，不再出现裸 `<Subject N>`／`<Picture N>`。标签只保留在定义行与「标签映射」。
+  - 同一段同一主体只用一个名字，跨镜不换称呼；两个角色同名时用资产编号区分，例 `方源（C01）`、`方源（C02）`。
+  - 说话人写成 `方源(S1)`，不写 `<Subject 1> (S1)`。
+  - 主体名与图片名分开：人物主体名 `方源`，人物图片名 `方源全身图`／`方源面部图`；场景主体名 `荒山巅石台`，场景图片名 `荒山巅石台全景图`。叙事用主体名，只有明确要挂某张帧／构图图时才写图片名。
+  - 例：`<Subject 1>（图片名：方源） is the man whose face comes from 方源面部图（@图片 2）...`，正文写 `方源 sits on the stone platform...`。
+- `detailed_description` 里第一次出现某主体时，把它指代的外形、画面位置、当前动作写清；后文复用同一个中文名，不重新定义。
 
 ---
 
@@ -93,11 +100,11 @@
 可见参考，一条一行：
 
 ```text
-<Subject 1> (appears in [Shot 1], [Shot 2]): fully_preserved - face, hairstyle, outfit and body build follow the reference.
+方源（appears in [Shot 1], [Shot 2]): fully_preserved - face, hairstyle, outfit and body build follow the reference.
 ```
 
 ```text
-<Subject 2> (appears in [Shot 1]): partially_preserved - room layout and door-on-the-right are kept; the lamp brightness is changed by the story.
+荒山巅石台（appears in [Shot 1]): partially_preserved - room layout and door-on-the-right are kept; the lamp brightness is changed by the story.
 ```
 
 | 标记 | 含义 |
@@ -110,7 +117,7 @@
 音频参考：
 
 ```text
-<Audio 1>: reference - its vocal timbre guides <Subject 1> (S1) without copying the original signal.
+<Audio 1>: reference - its vocal timbre guides 方源(S1) without copying the original signal.
 ```
 
 | 标记 | 含义 |
@@ -142,7 +149,7 @@
 必须写全三件事：**运动类型 ＋ 幅度 ＋ 速度**，写成镜头内自然英文句：
 
 ```text
-The camera pushes in with small amplitude at slow speed toward <Subject 1>'s hands.
+The camera pushes in with small amplitude at slow speed toward 方源的手。
 The camera pans right with large amplitude at fast speed, revealing the open doorway.
 The camera holds a static shot as the runner exits the frame.
 ```
@@ -152,7 +159,7 @@ The camera holds a static shot as the runner exits the frame.
 ### 7.2 说话人与台词
 
 - 说话人用稳定 ID：`(S1)`、`(S2)`；同一人跨镜、跨段复用同一 ID；不发声的人不给 ID；多人同时说用 `(S1,S2)`。
-- 主体说话写成 `<Subject N> (Sx)`；画外说话保留同一形式并写 `off-screen`。
+- 主体说话写成 `方源(Sx)`；画外说话保留同一形式并写 `off-screen`。
 - 台词只放 `<d>[Language] 原文</d>`，`[Language]` 写 `Chinese`／`English` 等，原文逐字、标点保留，不翻译、不改写。
 - 听不清写 `[unclear]`，不许猜、不许改写。
 - 台词标点标准化为 `, . ? !`，去掉重复波浪号、emoji、装饰符号。
@@ -198,7 +205,7 @@ A red neon sign reading "营业中" glows above the doorway.
 6. 说话人 `(Sx)` 稳定；每句台词都在 `<d>[Language] 原文</d>` 内；画外音写了 `off-screen voiceover` 与闭唇。
 7. `overall_soundscape` 1–4 句，不重复台词与画内音乐。
 8. `non_diegetic_music` 为 `N/A` 或用户指定配乐；没有主动加 BGM。
-9. 英文正文里没有残留中文（`<d>` 与画面可见引文除外）。
+9. 英文正文里没有残留中文（`<d>`、画面可见引文与 R20.3 图片中文名除外）；正文没有裸 `<Subject N>`／`<Picture N>`。
 10. 字数落在 350–500 英文词左右；台词密集段以排满发声时间为准。
 11. 时间码、镜头数、切点数与分镜逐镜对得上；段总时长与元数据一致。
 12. `check_rule.py` 的 Ref2VA 机械项全 PASS，再走人工核对。

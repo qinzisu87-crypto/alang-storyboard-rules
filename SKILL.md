@@ -1,6 +1,6 @@
 ---
 name: 阿良的分镜制作规则
-description: 阿良短剧分镜制作规则（H3 投产版）总控。以《制作规则》为主规则、旧 duanju-storyboard-to-h3 只提供基础层。用户给剧本、小说（任意长短、网文、整本或章节片段）或上一集的剧本.md，先问一句「先生剧本还是跳过剧本」（R32／R33），一次只做 1 集（每集 4 分钟），跑完三层：剧集/<EP>/剧本.md、分镜.md（九栏，每镜一条可直接粘贴的中文动作提示词，不写时间码）、分段视频提示词.md（相邻镜打包成 4–15 秒生成段，按官方 Ref2VA 六段式：subject_definitions／summary／retention_analysis／detailed_description／overall_soundscape／non_diegetic_music；正文英文、台词包 `<d>`、首镜无时间码、后续镜按 `At MM:SS.mmm` 切点）；另出人物资产.md、场景资产.md 与道具资产.md，三者都先问 A／B／AB 再写。小说一进来先在这 21 个题材（幻想／古代／现代／类型片四大类）里选一个，再按该题材的五项（节奏／对白字数与开口占比／台词口径／进度字段／尺度）写。触发语：按制作规则做 EPxxx、按这本小说做 EP001、把这段网文做成短剧、出这集分镜、出分段视频提示词、改剧本/改分镜/改分段、把这集做成能直接生成的 H3 提示词、出人物资产、出场景资产、阿良分镜、阿良制作规则。
+description: 阿良短剧分镜制作规则（H3 投产版）总控。以《制作规则》为主规则、旧 duanju-storyboard-to-h3 只提供基础层。用户给剧本、小说（任意长短、网文、整本或章节片段）或上一集的剧本.md，先问一句「先生剧本还是跳过剧本」（R32／R33），一次只做 1 集（每集 4 分钟），跑完三层：剧集/<EP>/剧本.md、分镜.md（九栏，每镜一条可直接粘贴的中文动作提示词，不写时间码）、分段视频提示词.md（相邻镜打包成 4–15 秒生成段，按官方 Ref2VA 六段式：subject_definitions／summary／retention_analysis／detailed_description／overall_soundscape／non_diegetic_music；正文英文、台词包 `<d>`、人景物写图片中文名、首镜无时间码、后续镜按 `At MM:SS.mmm` 切点）；另出人物资产.md、场景资产.md 与道具资产.md，三者都先问 A／B／AB 再写。小说一进来先在这 21 个题材（幻想／古代／现代／类型片四大类）里选一个，再按该题材的五项（节奏／对白字数与开口占比／台词口径／进度字段／尺度）写。触发语：按制作规则做 EPxxx、按这本小说做 EP001、把这段网文做成短剧、出这集分镜、出分段视频提示词、改剧本/改分镜/改分段、把这集做成能直接生成的 H3 提示词、出人物资产、出场景资产、阿良分镜、阿良制作规则。
 license: MIT
 ---
 
@@ -44,9 +44,10 @@ license: MIT
 10. 续做时读 `剧集/<EP>/剧本.md`；跨集沿用基础声、参考图槽号时，读上一集的 `分镜.md`。
 11. 做续集前先读项目根的 `项目交接.md`（R45）：小说改到哪、上一集结尾、已产出资产与画风锁都在里面。
 12. 写 `分段视频提示词.md` 之前读 `references/表演参考/` — 微表情、镜头与光影、动作与肢体、分镜与场景四篇（R48）；按角色对号改写进提示词，不整条照搬；所有画面按第三视角记录，只有镜头找人、没有人找镜头（R49）；分镜提示词按动作顺序写细，不写时间码、不逐秒拆行（R50）。
-13. 写 `分段视频提示词.md` 时，按官方 Ref2VA 六段式落盘（R20）：先 `subject_definitions` 定 `<Subject N>／<Picture N>／<Video N>／<Audio N>` 四类标签，再 `summary` 任务类型前缀＋参考关系，`retention_analysis` 逐条保留度标记，`detailed_description` 按播放顺序写画面/动作/机位/台词，`overall_soundscape` 环境动作声，`non_diegetic_music` 观众配乐；分段不是分镜缩写，动作、表情、声音、台词情绪按动作顺序写全（R51）。
+13. 写 `分段视频提示词.md` 时，按官方 Ref2VA 六段式落盘（R20）：先 `subject_definitions` 给 `<Subject N>／<Picture N>／<Video N>／<Audio N>` 定义并写 `（图片名：<中文名>）`，正文一律用图片中文名、不写裸标签（R20.3）；再 `summary` 任务类型前缀＋参考关系，`retention_analysis` 逐条保留度标记，`detailed_description` 按播放顺序写画面/动作/机位/台词，`overall_soundscape` 环境动作声，`non_diegetic_music` 观众配乐；分段不是分镜缩写，动作、表情、声音、台词情绪按动作顺序写全（R51）。
 14. 分段里的人物绝不对视镜头：镜头可以拍脸、拍眼睛、给眼睛特写，但眼球、瞳孔、目光不许对镜头；每个写到脸或特写的句子写清视线落点；`detailed_description` 风格句后固定写英文 `The camera observes as an outside witness. No character looks into the lens; every eyeline stays on an in-scene object, opponent, or off-screen story target, while the camera may photograph faces and eyes.`（R52）。
-15. 分段正文用英文写（官方口径），台词、歌词、画面可见文字保留原语言并包进 `<d>[语言] 原文</d>`；参考标签 `<Subject N>／<Picture N>／<Video N>／<Audio N>` 与说话人 `(Sx)` 编号在六段之间保持一致；`@图片 N` 槽号、`@Cxx／@Sxx／@Pxx` 引用、台词先后、多人说话顺序一个不改（R53）。
+15. 分段正文用英文写（官方口径），台词、歌词、画面可见文字保留原语言并包进 `<d>[语言] 原文</d>`；R20.3 的图片中文名是唯一允许进入英文正文的中文名词；`<Subject N>／<Picture N>／<Video N>／<Audio N>` 与 `(Sx)` 编号在六段之间保持一致；`@图片 N` 槽号、`@Cxx／@Sxx／@Pxx` 引用、台词先后、多人说话顺序一个不改（R53）。
+16. 正文引用图片一律写图片中文名（R20.3）：`summary`／`retention_analysis`／`detailed_description` 不出现裸 `<Subject N>`／`<Picture N>`；台词行写 `方源(S1) says ...`，不写 `<Subject 1> (S1)`。
 
 ## 2. 输入处理（基础层）
 
@@ -392,38 +393,42 @@ license: MIT
 - 场景与轴线：           # 哪场、谁在画左画右、机位工作侧、本节光位与承接（R26／R40）
 - 表演参考：            # 命中 `表演参考/` 哪几条；未覆盖项注明自拟（R48）
 - 参考图：               # @图片 N 槽号 + 内容，全片固定
-- 标签映射：             # @Cxx→<Subject N>；@Sxx→<Subject N>；@Pxx→<Subject N>；@图片 N→<Picture N>（仅当首帧/尾帧/构图锚点/故事板）
+- 标签映射：             # @Cxx→<Subject N>（图片名：中文名）；@Sxx→<Subject N>（图片名：中文名）；@Pxx→<Subject N>（图片名：中文名）；@图片 N→<Picture N>（图片名：中文名；仅当首帧/尾帧/构图锚点/故事板）
 - 说话人：              # ①②③ 说话顺序 + (Sx) 编号对映；独白标 VO，不占说话顺序（R34）
 
 subject_definitions:
-<Subject 1> is <人物>，whose face and build come from <Picture 1> and <Picture 2>, ……
-<Subject 2> is <场景> in <Picture 3>, with ……
-<Subject 3> is <道具> in <Picture 4>, with ……
+<Subject 1>（图片名：方源） is <人物>，whose face and build come from 方源全身图 and 方源面部图, ……
+<Subject 2>（图片名：荒山巅石台） is <场景> seen in 荒山巅石台全景图, with ……
+<Subject 3>（图片名：春秋蝉） is <道具> seen in 春秋蝉白底图, with ……
+# 每条定义必须给一个唯一「图片中文名」，名字来自资产表；同一主体全段同名，不许换称呼。
 # 只定义本段实际用到的标签；人物/场景/道具的参考图只作主体来源时，写进对应 <Subject N>，
-# 不单开 <Picture N>。只有真正当首帧、关键帧、尾帧、构图锚点或故事板的图，才单独定义 <Picture N>。
+# 不单开 <Picture N>。只有真正当首帧、关键帧、尾帧、构图锚点或故事板的图，才单独定义 <Picture N>，
+# 写成 <Picture N>（图片名：<图片中文名>）。
 # <Video N> 只有真的把视频挂进来才写；<Audio N> 只有音频参考才写。
 
 summary:
-[reference generation] <一句话英文：谁在哪做什么，参考关系是什么>
+[reference generation] <一句话英文：谁在哪做什么，参考关系是什么；人物/场景/道具一律写图片中文名>
 # 任务类型按实际资产角色选：keyframe completion / reference generation / video editing /
 # video continuation / audio reuse / audio reference；多关系用 ` + ` 连接，不重复同一类型。
 # 只是剧情承接、没有把上一段视频当输入，不许写 video continuation，不许写 <Video N>。
 
 retention_analysis:
-<Subject 1> (appears in [Shot 1], [Shot 2]): fully_preserved - ……
-<Subject 2> (appears in [Shot 1]): partially_preserved - ……
+方源(appears in [Shot 1], [Shot 2]): fully_preserved - ……
+荒山巅石台(appears in [Shot 1]): partially_preserved - ……
 # 可见参考只用 fully_preserved / partially_preserved / attribute_transfer / weak_reference；
 # 音频参考只用 fully_copy / partially_copy / reference / weak_reference。
+# 这里也写图片中文名，不写裸 <Subject N>。
 
 detailed_description:
 <一到两句英文风格句，与 REF 画风锁一致；随后写第三视角与不看镜头、只有说话人动唇、不生成字幕等硬约束>
-[Shot 1] <机位与构图、谁在哪、环境光、动作到关节与承重、表情肌、视线落点、道具位移、当前声音>
-<Subject 1> (S1) says <d>[Chinese] 原文台词</d>
+[Shot 1] <机位与构图、谁在哪、环境光、动作到关节与承重、表情肌、视线落点、道具位移、当前声音；人/景/物写图片中文名>
+方源(S1) says <d>[Chinese] 原文台词</d>
 [Shot 2] At MM:SS.mmm, the camera cuts to <新画面、新主体位置与动作、光位、视线落点>
-<Subject 2> (S2) says <d>[Chinese] 原文台词</d>
+小赵(S2) says <d>[Chinese] 原文台词</d>
 # 首镜不写时间码；后续镜 At MM:SS.mmm 严格递增且小于本段时长。
+# 六段正文不再出现裸 <Subject N>／<Picture N>；除定义行与标签映射外，一律写图片中文名。
 # 台词只出现一次；说话人挂稳定 (Sx)；台词原词、标点逐字保留，不翻译。
-# 画外音/独白：<Subject 1> (S1) says in an off-screen voiceover: <d>[Chinese] ……</d>; his lips remain completely closed.
+# 画外音/独白：方源(S1) says in an off-screen voiceover: <d>[Chinese] ……</d>; his lips remain completely closed.
 # 跨切台词用 <scenetrans>；片尾截断用 <cutoff>；画面可见文字用英文双引号原样写。
 # 机位运动写成自然句：运动类型 + 幅度 + 速度（R20.1）。
 
@@ -435,14 +440,22 @@ N/A
 # 默认 N/A；用户当次点名配乐才写 1–3 句配器/速度/节奏/动态，并在元数据「声音」处标「配乐（用户指定）」。
 ```
 
-**R20.1 机位运动三要素与官方词表。** 每个运动镜头必须写全：**运动类型**（取官方词表：Zoom In/Out、Push In/Pull Out、Pan Left/Right、Truck Left/Right、Tilt Up/Down、Pedestal Up/Down、Arc Shot、Tracking Shot、Static Shot、Shake Slightly/Strongly、POV、Roll Clockwise/Counterclockwise）＋**幅度**（with small/large amplitude）＋**速度**（at slow/fast speed）；写成自然句，例：`The camera pushes in with small amplitude at slow speed toward <Subject 1>'s hands.` 固定镜写 Static Shot。POV 镜按 R12-6 单独标，不与实景共享轴线。
+**R20.1 机位运动三要素与官方词表。** 每个运动镜头必须写全：**运动类型**（取官方词表：Zoom In/Out、Push In/Pull Out、Pan Left/Right、Truck Left/Right、Tilt Up/Down、Pedestal Up/Down、Arc Shot、Tracking Shot、Static Shot、Shake Slightly/Strongly、POV、Roll Clockwise/Counterclockwise）＋**幅度**（with small/large amplitude）＋**速度**（at slow/fast speed）；写成自然句，例：`The camera pushes in with small amplitude at slow speed toward 方源的手。` 固定镜写 Static Shot。POV 镜按 R12-6 单独标，不与实景共享轴线。
 
 **R20.2 说话人编号与台词格式。**
 - 说话人按本段实际发声事件顺序分配 `(S1)(S2)…`，跨镜复用同一编号；不发声的角色不给 ID；复合在场用 `(S1,S2)`。
-- `<Subject N> (Sx)` 同时挂参考主体与说话人；台词行格式：`<Subject 1> (S1) says <d>[Chinese] 几点了。</d>`。
+- **R20.3 的图片中文名＋ `(Sx)`** 同时挂主体与说话人；台词行格式：`方源(S1) says <d>[Chinese] 几点了。</d>`。
 - 台词原词、标点逐字保留，不翻译、不改写；听不清写 `[unclear]`；标点标准化为 `, . ? !`，去 emoji 与装饰标点。
-- 独白（R22）：`<Subject 1> (S1) says in an off-screen voiceover: <d>[Chinese] ……</d>; his lips remain completely closed, breath through the nose and teeth.`，不占说话顺序，不另造 `S1-VO` 这种新编号。
+- 独白（R22）：`方源(S1) says in an off-screen voiceover: <d>[Chinese] ……</d>; his lips remain completely closed, breath through the nose and teeth.`，不占说话顺序，不另造 `S1-VO` 这种新编号。
 - 基础音色全片固定（R7），情绪只改力度、速度、气息、尾音与停顿；不管多怒、多怕、多虚，音色不许大幅变化；口音、年龄感、沙哑度只有剧情写明才改。
+
+**R20.3 正文引用图片一律写“图片中文名”，不写裸标签。**（2026-11-18 增补）
+1. **定义行给名。** `subject_definitions` 每条 `<Subject N>` 后面必须跟 `（图片名：<中文名>）`；`<Picture N>` 同样写 `（图片名：<中文名>）`。名字取自资产表里的人名／场景名／道具名／图片名，不许用「图1」「素材A」这种空名。
+2. **正文只写名字。** `summary`、`retention_analysis`、`detailed_description` 里引用人、场景、道具、首帧、尾帧、构图锚点时，一律写图片中文名；**不再出现裸 `<Subject N>`／`<Picture N>`**。标签只在 `subject_definitions` 定义行和元数据「标签映射」里保留，供对账与挂图。
+3. **同名唯一。** 同一段里同一主体只用一个中文名，跨镜不换称呼；两个人同名时用资产表编号区分，例 `方源（C01）`、`方源（C02）`，但名字一旦定了全段不改。
+4. **说话人挂名字。** 说话人编号挂在中文名后：`方源(S1) says <d>[Chinese] 原文</d>`；画外音 `小赵(S1) says in an off-screen voiceover...`；不再写 `<Subject 1> (S1)`。
+5. **图片名与主体名分开。** 人物主体名写 `方源`；人物图片名写 `方源全身图`／`方源面部图`。场景主体名写 `荒山巅石台`；场景图片名写 `荒山巅石台全景图`。正文叙事用主体名，只有明确要挂某张帧／构图图时才写图片名。
+6. **检查。** `check_rule.py` 会核对：每条 `<Subject N>` 是否有 `图片名：`、正文是否出现该名字、正文是否残留裸 `<Subject N>`／`<Picture N>`；定义漏名或正文没用到该名即 FAIL。
 
 **段数不预设。** 段数由镜长决定，不硬凑整数段；用户要固定段数（如 11 段或 21 段）时，按声明重切。
 
@@ -451,8 +464,8 @@ N/A
 **R52 分段人物绝不对视镜头。** 镜头可以推近拍脸，也可以拍眼睛、给眼睛特写，但人物的眼球、瞳孔、目光不许对准镜头。每一段 `detailed_description` 的风格句后必须用英文写死：`The camera observes as an outside witness. No character looks into the lens; every eyeline stays on an in-scene object, opponent, or off-screen story target, while the camera may photograph faces and eyes.` 每个写到脸、眼睛或特写的句子必须写清视线落点（对手的脸／手、门缝、剑柄、桌面、地面、远处窗口）；剧情没给落点就按现场关系选，不许留空，更不许用看镜头补。英文禁写：`look into the lens`、`look at the camera`、`stare into the lens`、`meet the camera`、`eye contact with the camera`、`address the audience`、`first-person POV`（剧本明确要求 POV 时另按 R12-6 处理）。
 
 **R53 分段正文语言、标签与时间码口径。**
-1. **正文英文，台词与屏显文字保留原语言。** 除 `<d>` 内台词/歌词与画面可见引文外，六段正文一律用英文；台词用 `<d>[Language] 原文</d>` 包裹，`[Language]` 写 `Chinese`／`English` 等，原文逐字保留。
-2. **标签一致。** `<Subject N>／<Picture N>／<Video N>／<Audio N>` 与 `(Sx)` 在六段之间编号一致；本技能的 `@Cxx／@Sxx／@Pxx`、`@图片 N` 槽号、台词先后、多人说话顺序保留在元数据行，与官方标签一一对应，不另起一套。
+1. **正文英文，台词与屏显文字保留原语言。** 除 `<d>` 内台词/歌词、画面可见引文、以及 R20.3 的图片中文名外，六段正文一律用英文；台词用 `<d>[Language] 原文</d>` 包裹，`[Language]` 写 `Chinese`／`English` 等，原文逐字保留。
+2. **标签一致，正文写中文名。** `<Subject N>／<Picture N>／<Video N>／<Audio N>` 与 `(Sx)` 在六段之间编号一致；但正文（`summary`／`retention_analysis`／`detailed_description`）一律写 R20.3 的图片中文名，不写裸标签；`subject_definitions` 定义行与元数据「标签映射」保留标签。本技能的 `@Cxx／@Sxx／@Pxx`、`@图片 N` 槽号、台词先后、多人说话顺序保留在元数据行，与官方标签一一对应，不另起一套。
 3. **时间码按官方写。** 首镜 `[Shot 1]` 不写时间码；从 `[Shot 2]` 起写 `At MM:SS.mmm,`，切点严格递增且小于本段时长。此前「分段提示词完全不写时间码」的口径作废，只保留给分镜层。
 4. **细节与术语。** 英文描述仍要让人读得出「谁、在哪、朝哪、做什么、什么表情、眼睛看哪、手里拿什么」；官方机位词表（R20.1）与本技能的景别/承重/视线落点要求并用，不许只堆术语不写可见事实。
 
@@ -647,7 +660,7 @@ python "<本技能目录>\scripts\check_rule.py" --project "<项目目录>" --ep
 26. **R50 提示词写细**：每镜提示词从「起幅：」起连续写，不写时间码；每个动作句都写了七件事；没有「他看着／她笑了／气氛紧张」这类一句话带过；起幅写了空间与机位；没有少于 15 个汉字的动作句（R50）。
 27. **R51 分段不缩写**：六段式齐全；`detailed_description` 里的动作、表情、光、道具不比同镜分镜少；台词挂 `(Sx)` 并包进 `<d>[Language] 原文</d>`，原文逐字保留；`overall_soundscape` 有底声与动作声；没有把一群人写成「众人／群雄」一句话带过（R51）。
 28. **R52 分段不看镜头**：每段 `detailed_description` 有 outside witness 英文句；每个写到脸或特写的句子都写了视线落点；没有眼睛正对镜头、目光对镜头、看向观众（R52）。
-29. **R53 语言、标签与时间码口径**：六段正文用英文，台词/屏显文字保留原语言包进 `<d>`；`<Subject N>／<Picture N>／<Video N>／<Audio N>` 与 `(Sx)` 六段间编号一致；人物图只作主体来源时不单开 `<Picture>`；`@图片 N` 槽号、`@Cxx／@Sxx／@Pxx`、台词先后与多人顺序保留在元数据行；首镜无时间码、后续镜 `At MM:SS.mmm` 严格递增且在段长内；六段前没有中文约束段。
+29. **R20.3／R53 语言、图片中文名、标签与时间码口径**：每条 `<Subject N>`／`<Picture N>` 定义带 `（图片名：<中文名>）`；`summary`／`retention_analysis`／`detailed_description` 正文只用图片中文名，不出现裸标签；台词行写 `方源(S1)`。六段正文用英文，台词/屏显文字与中文名保留原语言包进 `<d>`；`<Subject N>／<Picture N>／<Video N>／<Audio N>` 与 `(Sx)` 六段间编号一致；人物图只作主体来源时不单开 `<Picture>`；`@图片 N` 槽号、`@Cxx／@Sxx／@Pxx`、台词先后与多人顺序保留在元数据行；首镜无时间码、后续镜 `At MM:SS.mmm` 严格递增且在段长内；六段前没有中文约束段。
 
 ## 11. 工程注意事项（踩过的坑）
 
