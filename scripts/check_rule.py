@@ -220,6 +220,8 @@ def check_segment_sections(body, where, fails, warns):
                     fails.append("%s retention_analysis 主体条目缺朝向重排声明（R54）：%s" % (where, st[:60]))
                 if "partially_preserved" in st or "attribute_transfer" in st:
                     fails.append("%s retention_analysis 用了 R54 不允许的档位；只许 fully_preserved／weak_reference：%s" % (where, st[:60]))
+            elif any(k in st for k in VIS_MARKERS) and "appears" in st:
+                fails.append("%s retention_analysis 主体条目没有以 <Subject N>（图片名：…） 开头（R54）：%s" % (where, st[:60]))
         if bad > 3:
             fails.append("%s retention_analysis 另有 %d 条缺合法标记（R20）" % (where, bad - 3))
 
