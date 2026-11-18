@@ -24,15 +24,13 @@ RE_DIALOGUE = re.compile(r"^([^\s：:\[\]#]{1,8})[：:]\s*(\S.*)$", re.M)
 RE_BOARD_SCENE = re.compile(r"^##\s*第\s*(\d+)\s*场\s*[｜|]\s*(.+)$", re.M)
 RE_SHOT = re.compile(r"^###\s*镜头\s*(\d+-\d+)\s*[｜|]\s*(.+)$", re.M)
 RE_SEG = re.compile(r"^##\s*第\s*(\d+)\s*段\s*(?:[｜|]\s*(.+))?$", re.M)
-RE_TIME = re.compile(r"^\s*(\d{1,2}):(\d{2})\s")
+TIME_CODE_RE = re.compile(r"(?<!\d)(\d{1,2}):(\d{2})(?!\d)")
 
 SHOT_FIELDS = ["拍摄手法", "动作", "动作先后", "表情", "自然规律", "声音", "台词", "参考图", "提示词"]
 SEG_FIELDS = ["时长", "场景与轴线", "参考图", "声音", "台词落点", "提示词"]
 MONO_WORDS = ("内心", "独白", "VO", "画外音")
 MOUTH_CONFLICT = ("嘴唇开始动", "说完合上", "嘴唇开合", "嘴唇张开", "嘴巴张开")
 MOUTH_CLAUSE = "其他角色嘴唇闭合"
-SPK_LINE = re.compile(r"^\s*(\d{1,2}):(\d{2})\s*(?!起幅\s*[：:]|切\s*[：:]|转场\s*[：:]|镜头|画面)([^\s：:（]{1,8})(?:（[^）]*）)?[：:]\s*(.+)$", re.M)
-LINE_ENTRY = re.compile(r"(\d{1,2}):(\d{2})\s*([^\s；;，,、]{1,8})")
 MUSIC_RE = re.compile(r"(BGM|bgm|背景音乐|背景纯音乐|纯音乐|垫乐|配乐)")
 SLOT = re.compile(r"@图片\s*(\d+)")
 RE_SCENE_ASSET_BLOCK = re.compile(r"^##\s*(S\d{2})\s*(.*)$", re.M)
@@ -71,37 +69,48 @@ GAZE_RE = re.compile(
     r"|看向观众|望向观众|直视观众|对着观众"
     r"|第一人称主观|主观视角|视线[^，。；\n]{0,6}镜头)"
 )
-TIME_LINE = re.compile(r"^\s*(\d{1,2}):(\d{2})\s")
-DIALOGUE_LINE = re.compile(r"^\s*\d{1,2}:\d{2}\s*(?!起幅\s*[：:]|切\s*[：:]|转场\s*[：:]|镜头|画面)[^\s：:（]{1,8}(?:（[^）]*）)?[：:]")
-VOICE_LABEL = re.compile(r"^\s*\d{1,2}:\d{2}\s*(?!起幅\s*[：:]|切\s*[：:]|转场\s*[：:]|镜头|画面)[^\s：:（]{1,8}（([^）]{4,})）\s*[：:]")
+DIALOGUE_LINE = re.compile(r"^\s*(?!约束|起幅|切\s*[：:]|转场|镜头|画面)[^\s：:（]{1,8}(?:（[^）]*）)?[：:]")
+VOICE_LABEL = re.compile(r"^\s*(?!约束|起幅|切\s*[：:]|转场|镜头|画面)[^\s：:（]{1,8}（([^）]{4,})）\s*[：:]")
 VOICE_PARAM = re.compile(r"(语速|音量|气声|咬字|尾音|停顿|喉部|鼻腔|气息)")
 EMO_WORD = re.compile(r"(情绪|怒|怕|慌|急|冷|喜|悲|讽|疲惫|压抑|平静|平常|常态|冷静|温和|无奈|疑惑|戒备|试探|敷衍|认真|紧张|心虚|克制|兴奋|恐惧|委屈|不甘|[一二三四五六七八九十]成)")
 BODY_RE = re.compile(r"(眉|眼|嘴|唇|下颌|下巴|喉|呼吸|手|指|肩|背|腰|膝|脚|腿|臂|腕|掌|视线|目光|重心|肌肉|咬肌|瞳孔|眼睑)")
 CJK = re.compile(r"[\u4e00-\u9fa5]")
 
 
+def check_no_timecode(pr, where, fails):
+    """R13：分镜与分段提示词都不写时间码。"""
+    hits = [(i, m.group(0)) for i, l in enumerate(pr.splitlines(), 1)
+            for m in TIME_CODE_RE.finditer(l)]
+    for line_no, code in hits[:3]:
+        fails.append("%s 第 %d 行出现时间码「%s」（R13 提示词不写时间码）" % (where, line_no, code))
+    if len(hits) > 3:
+        fails.append("%s 另有 %d 处时间码，未逐条列出（R13）" % (where, len(hits) - 3))
+    return len(hits)
+
+
 def check_segment_detail(pr, where, fails):
-    """R51/R53：分段提示词不是分镜缩写。逐秒行过短、没有 0:00 开头即 FAIL。"""
-    lines = [l.strip() for l in pr.splitlines() if TIME_LINE.match(l.strip())]
+    """R51/R53：分段提示词不是分镜缩写。动作句过短、没有起幅即 FAIL。"""
+    lines = [l.strip() for l in pr.splitlines() if not DIALOGUE_LINE.match(l.strip())]
+    lines = [l for l in lines if l and not l.startswith("约束")]
     if not lines:
         return 0
     bad = 0
-    if not any(l.startswith("0:00") for l in lines):
-        fails.append("%s 分段提示词没有从「0:00」开始（R53 白话从镜头一开始写）" % where)
+    if not any(l.startswith("起幅") for l in lines):
+        fails.append("%s 分段提示词没有从「起幅：」开始（R13 每个生成段从起幅写起）" % where)
         bad += 1
     short = 0
     for l in lines:
-        if DIALOGUE_LINE.match(l):
+        if l.startswith(("切：", "切:", "转场")):
             continue
         n = len(CJK.findall(l))
         if n < 15:
             short += 1
             if short <= 3:
-                fails.append("%s 分段秒行过短（%d 字）：%s（R51 分段不是分镜缩写，每行至少 15 个汉字）"
+                fails.append("%s 分段动作句过短（%d 字）：%s（R51 分段不是分镜缩写，每句至少 15 个汉字）"
                              % (where, n, l[:40]))
     if short > 3:
-        fails.append("%s 另有 %d 行分段提示词过短，未逐条列出（R51）" % (where, short - 3))
-    body_lines = [l for l in lines if not DIALOGUE_LINE.match(l) and BODY_RE.search(l)]
+        fails.append("%s 另有 %d 句分段提示词过短，未逐条列出（R51）" % (where, short - 3))
+    body_lines = [l for l in lines if BODY_RE.search(l)]
     if not body_lines:
         fails.append("%s 分段提示词没有任何表情肌／身体／视线细节（R51 不是分镜缩写）" % where)
         bad += 1
@@ -173,26 +182,30 @@ def check_camera_gaze(text, where, fails):
 
 
 def check_prompt_detail(pr, where, fails):
-    """R50：分镜提示词逐秒写细。缺起幅、非台词秒行过短即 FAIL。"""
-    lines = [l.strip() for l in pr.splitlines() if TIME_LINE.match(l.strip())]
+    """R50：分镜提示词按动作顺序写细。缺起幅、动作句过短即 FAIL。"""
+    lines = [l.strip() for l in pr.splitlines() if not DIALOGUE_LINE.match(l.strip())]
+    lines = [l for l in lines if l and not l.startswith("约束")]
     if not lines:
         return 0
     bad = 0
-    if not any("起幅" in l for l in lines):
-        fails.append("%s 提示词缺「0:00 起幅」（R50 起幅要写空间与机位）" % where)
+    if not any(l.startswith("起幅") for l in lines):
+        fails.append("%s 提示词缺「起幅：」（R50 起幅要写空间与机位）" % where)
         bad += 1
     short = 0
     for l in lines:
-        if DIALOGUE_LINE.match(l):
+        if l.startswith(("切：", "切:", "转场")):
             continue
         n = len(CJK.findall(l))
         if n < 15:
             short += 1
             if short <= 3:
-                fails.append("%s 提示词秒行过短（%d 字）：%s（R50 每行写细，至少 15 个汉字）"
+                fails.append("%s 提示词动作句过短（%d 字）：%s（R50 每句写细，至少 15 个汉字）"
                              % (where, n, l[:40]))
     if short > 3:
-        fails.append("%s 另有 %d 行提示词过短，未逐条列出（R50）" % (where, short - 3))
+        fails.append("%s 另有 %d 句提示词过短，未逐条列出（R50）" % (where, short - 3))
+    if not any(BODY_RE.search(l) for l in lines):
+        fails.append("%s 提示词没有任何表情肌／身体／视线细节（R50 不许概括）" % where)
+        bad += 1
     return bad + short
 
 
@@ -234,32 +247,10 @@ def prompt_text(fields):
     return sec
 
 
-def time_map(prompt):
-    """返回 (每秒行数, 最晚秒数)；秒数从 0 起算。"""
-    counts, last = {}, -1
-    for line in prompt.splitlines():
-        m = RE_TIME.match(line)
-        if not m:
-            continue
-        sec = int(m.group(1)) * 60 + int(m.group(2))
-        counts[sec] = counts.get(sec, 0) + 1
-        last = max(last, sec)
-    return counts, last
-
-
-def check_time(prompt, where, fails):
-    counts, last = time_map(prompt)
-    if not counts:
-        fails.append("%s 提示词里没有任何时间码" % where)
-        return None
-    if 0 not in counts:
-        fails.append("%s 提示词没有从 0:00 起幅" % where)
-    for sec in range(0, last + 1):
-        if sec not in counts:
-            fails.append("%s 第 %d 秒缺行（时间码必须逐秒连续）" % (where, sec))
-        elif counts[sec] > 2:
-            fails.append("%s 第 %d 秒写了 %d 行（每秒最多一行台词加一行动作）" % (where, sec, counts[sec]))
-    return last + 1
+def shot_duration(fields):
+    """镜长从「拍摄手法」里的「镜长 N 秒」取；不按提示词时间码反推。"""
+    m = re.search(r"镜长\s*(\d+)\s*秒", fields.get("拍摄手法", ""))
+    return int(m.group(1)) if m else None
 
 
 def check_slots(text, where, fails, notes):
@@ -516,27 +507,23 @@ STYLE_ANY = re.compile(r"(REF-\d{3})")
 
 
 def check_multi_speaker(prompt, where, fails):
-    """R34：多人同场要排队说；一人说时别人嘴不动；同一秒不许两人。"""
-    spk = [(int(a) * 60 + int(b), name) for a, b, name, _ in SPK_LINE.findall(prompt)]
-    if len(set(name for _, name in spk)) >= 2:
+    """R34：多人同场要排队说；一人说时别人嘴不动。"""
+    names = [DIALOGUE_LINE.match(l.strip()).group(0).split("（")[0].rstrip("：:") 
+             for l in prompt.splitlines() if DIALOGUE_LINE.match(l.strip())]
+    if len(set(names)) >= 2:
         first = prompt.splitlines()[0] if prompt.splitlines() else ""
         if MOUTH_CLAUSE not in first:
             fails.append("%s 多人对话，段首约束行没写「%s」（R34）" % (where, MOUTH_CLAUSE))
-    secs = {}
-    for sec, name in spk:
-        secs.setdefault(sec, set()).add(name)
-    for sec, names in secs.items():
-        if len(names) >= 2:
-            fails.append("%s %d:%02d 有两人同时说话：%s（一句一人、按顺序，R34）"
-                         % (where, sec // 60, sec % 60, "、".join(sorted(names))))
 
 
 def check_line_order(field, where, label, fails):
-    """R34：台词索引／台词落点必须按秒数先后排。"""
-    items = LINE_ENTRY.findall(field or "")
-    secs = [int(a) * 60 + int(b) for a, b, _ in items]
-    if secs != sorted(secs):
-        fails.append("%s「%s」秒数没按先后排：%s（R34）" % (where, label, (field or "").strip()[:30]))
+    """R34：台词索引／台词落点按 ①②③ 排，不许写时间码。"""
+    text = field or ""
+    if TIME_CODE_RE.search(text):
+        fails.append("%s「%s」写了时间码：%s（R13 不写时间码，按 ①②③ 排）" % (where, label, text.strip()[:30]))
+    nums = re.findall(r"[①②③④⑤⑥⑦⑧⑨]", text)
+    if nums and nums != sorted(set(nums), key="①②③④⑤⑥⑦⑧⑨".index):
+        fails.append("%s「%s」说话顺序颠倒：%s（R34）" % (where, label, text.strip()[:30]))
 
 
 def check_style(texts, fails):
@@ -809,7 +796,8 @@ def main():
         pr = prompt_text(f)
         board_prompt_all.append(pr)
         check_prompt_detail(pr, where, fails)
-        dur = check_time(pr, where, fails)
+        check_no_timecode(pr, where, fails)
+        dur = shot_duration(f)
         shot_durs[sid] = dur
         if dur and dur > 15:
             warns.append("%s 单镜 %d 秒，超过 H3 单次上限，须并进容器或拆镜" % (where, dur))
@@ -823,9 +811,9 @@ def main():
         tl = f.get("台词", "").strip()
         if tl and tl != "无":
             if re.search(r"[\u4e00-\u9fa5]{6,}", tl):
-                fails.append("%s「台词」栏抄了原文，只该写秒数与说话人" % where)
-            if not re.search(r"\d+\s*:\s*\d{2}", tl):
-                fails.append("%s「台词」栏缺秒数（格式 0:02 周野）" % where)
+                fails.append("%s「台词」栏抄了原文，只该写说话顺序与说话人" % where)
+            if not re.search(r"[①②③④⑤⑥⑦⑧⑨]", tl):
+                fails.append("%s「台词」栏缺说话顺序（格式 ① 周野 → ② 小赵）" % where)
         check_multi_speaker(pr, where, fails)
         check_line_order(tl, where, "台词", fails)
         # 独白
@@ -844,12 +832,12 @@ def main():
             fails.append("%s「动作」栏用了冒号，会被当成台词行；改用逗号" % where)
 
     if shot_durs and any(v is None for v in shot_durs.values()):
-        fails.append("有镜头没算出时长，秒数合计不可信")
+        fails.append("有镜头没在「拍摄手法」里写「镜长 N 秒」，时长合计不可信")
 
     # ---------- 分段 ----------
     segs = split_blocks(seg_txt, RE_SEG)
     if not segs:
-        fails.append("分段视频提示词.md 未找到段标题（应为「## 第 N 段 ｜ 0:00–0:09 ｜ 场名」）")
+        fails.append("分段视频提示词.md 未找到段标题（应为「## 第 N 段 ｜ 场名」）")
 
     seg_prompt_all = []
     seg_durs = []
@@ -865,9 +853,9 @@ def main():
         check_segment_detail(pr, where, fails)
         check_segment_voice(f, pr, where, fails)
         check_segment_gaze(pr, where, fails)
+        check_no_timecode(pr, where, fails)
         if not pr.splitlines() or "约束" not in pr.splitlines()[0]:
             fails.append("%s 提示词第一行不是固定约束行" % where)
-        dur = check_time(pr, where, fails)
         dl = re.sub(r"[^\d]", "", f.get("时长", "").split("\n")[0])
         declared = int(dl) if dl else None
         if declared is None:
@@ -875,8 +863,6 @@ def main():
         else:
             if not (4 <= declared <= 15):
                 fails.append("%s 时长 %d 秒不在 4–15 区间" % (where, declared))
-            if dur and declared != dur:
-                fails.append("%s 标称 %d 秒，但提示词只覆盖 %d 秒" % (where, declared, dur))
             seg_durs.append(declared)
         check_slots(f.get("参考图", "") + "\n" + pr, where, fails, notes)
         allow_music = "用户指定" in f.get("声音", "")
@@ -885,7 +871,7 @@ def main():
         landing = f.get("台词落点", "").strip()
         if landing and landing != "无":
             if re.search(r"[\u4e00-\u9fa5]{6,}", landing):
-                fails.append("%s「台词落点」抄了原文，只该写秒数与说话人" % where)
+                fails.append("%s「台词落点」抄了原文，只该写说话顺序与说话人" % where)
         check_multi_speaker(pr, where, fails)
         check_line_order(landing, where, "台词落点", fails)
         # 转场标注：跨场次切点
