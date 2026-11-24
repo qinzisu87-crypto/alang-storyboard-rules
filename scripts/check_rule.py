@@ -24,14 +24,16 @@ RE_DIALOGUE = re.compile(r"^([^\s：:\[\]#]{1,8})[：:]\s*(\S.*)$", re.M)
 RE_BOARD_SCENE = re.compile(r"^##\s*第\s*(\d+)\s*场\s*[｜|]\s*(.+)$", re.M)
 RE_SHOT = re.compile(r"^###\s*镜头\s*(\d+-\d+)\s*[｜|]\s*(.+)$", re.M)
 RE_SEG = re.compile(r"^##\s*第\s*(\d+)\s*段\s*(?:[｜|]\s*(.+))?$", re.M)
-RE_SEG_SECTION = re.compile(r"^([a-z_]+)\s*:\s*$", re.M)
+RE_SEG_SECTION = re.compile(r"^[ \t]{0,6}([a-z_]+)\s*:\s*$", re.M)
 RE_SHOT_TAG = re.compile(r"\[Shot\s+\d+\]")
 RE_SUBJECT = re.compile(r"<Subject\s+\d+>")
 RE_PICTURE = re.compile(r"<Picture\s+\d+>")
 RE_SUBJECT_NAME = re.compile(r"<Subject\s+(\d+)>\s*[（(]\s*图片名[：:]\s*([^）)\n]+?)\s*[）)]")
 RE_PICTURE_NAME = re.compile(r"<Picture\s+(\d+)>\s*[（(]\s*图片名[：:]\s*([^）)\n]+?)\s*[）)]")
 RE_SPEAKER = re.compile(r"\(S\d+(?:,[^)]*)?\)")
+RE_SEG_DIALOGUE = re.compile(r"^\s{2,}\((S\d+(?:,S\d+)*)\)\s+([^：:\n]{1,20})[：:]\s*\[Chinese\]\s*(.+)$", re.M)
 RE_DIALOG_TAG = re.compile(r"<d>\s*\[[^\]]+\][^<]*</d>")
+MD_ESC = re.compile(r"\\([_<>\[\]])")
 TIME_CODE_RE = re.compile(r"(?<!\d)(\d{1,2}):(\d{2})(?!\d)")
 
 SHOT_FIELDS = ["拍摄手法", "动作", "动作先后", "表情", "自然规律", "声音", "台词", "参考图", "提示词"]
@@ -101,8 +103,14 @@ def check_no_timecode(pr, where, fails):
     return len(hits)
 
 
+def _norm_md(text):
+    r"""去掉 Markdown 反斜杠转义，供解析 `\_`、`\<`、`\[`。"""
+    return MD_ESC.sub(r"\1", text)
+
+
 def _seg_sections(body):
     """把一段分段正文按官方字段行切开，返回 {段名: 正文}。"""
+    body = _norm_md(body)
     hits = list(RE_SEG_SECTION.finditer(body))
     d = {}
     for i, h in enumerate(hits):
@@ -113,6 +121,7 @@ def _seg_sections(body):
 
 def check_segment_sections(body, where, fails, warns):
     """R20：官方 Ref2VA 六段字段齐全、顺序固定、六段前无约束段；detailed_description 不成分镜缩写（R51）。"""
+    body = _norm_md(body)
     sec = _seg_sections(body)
     hits = list(RE_SEG_SECTION.finditer(body))
     if not hits:
@@ -226,8 +235,8 @@ def check_segment_sections(body, where, fails, warns):
             fails.append("%s retention_analysis 另有 %d 条缺合法标记（R20）" % (where, bad - 3))
 
     words = len(re.findall(r"[A-Za-z]+", detail))
-    if words and not (350 <= words <= 500):
-        warns.append("%s detailed_description 约 %d 个英文词，官方建议 350–500（台词密集段可放宽，R51）" % (where, words))
+    if words and not (150 <= words <= 350):
+        warns.append("%s detailed_description 约 %d 个英文词，模板密度为 150–350（台词密集段按发声时间排满，R56）" % (where, words))
 
     sound = sec["overall_soundscape"].strip()
     if not sound:
@@ -277,32 +286,65 @@ def check_official_timecodes(detail, declared, where, fails):
     return bad
 
 
-def check_segment_dialogue(sec, where, fails):
-    """R51/R53/R20.3：台词挂图片中文名与 (Sx)；正文中文名合法、其他叙述英文；多人同场只许说话人动嘴。"""
-    detail = sec.get("detailed_description", "")
+def check_segment_dialogue(sec, where, fails, warns=None):
+    """R56：台词块后置、每句 `(Sx) 角色：[Chinese] 原文`；不用 <d>、不写 says；说话人按行递增。"""
+    detail = _norm_md(sec.get("detailed_description", ""))
     if not detail:
         return
-    names = [m.group(2).strip() for m in RE_SUBJECT_NAME.finditer(sec.get("subject_definitions", ""))]
-    d_tags = RE_DIALOG_TAG.findall(detail)
-    speakers = RE_SPEAKER.findall(detail)
-    if d_tags and not speakers:
-        fails.append("%s detailed_description 有 <d> 台词但没挂 (Sx) 说话人编号（R20.2）" % where)
-    if speakers and not d_tags:
-        fails.append("%s detailed_description 有 (Sx) 编号但台词没包进 <d>[Language] 原文</d>（R53）" % where)
-    if len(set(speakers)) >= 2 and "only the character who is speaking moves their lips" not in detail.lower():
+    names = [m.group(2).strip() for m in RE_SUBJECT_NAME.finditer(_norm_md(sec.get("subject_definitions", "")))]
+    if RE_DIALOG_TAG.search(detail) or "<d>" in detail:
+        fails.append("%s detailed_description 仍用 <d> 包台词；R56 模板要求 (Sx) 角色：[Chinese] 原文（不用 <d>）" % where)
+    if re.search(r"\bsays\b", detail, re.I):
+        fails.append("%s detailed_description 出现 says；R56 模板不写 says，台词只写 (Sx) 角色：[Chinese] 原文" % where)
+
+    lines = list(RE_SEG_DIALOGUE.finditer(detail))
+    if not lines:
+        if warns is not None:
+            warns.append("%s detailed_description 没有 (Sx) 台词行；若本段剧本有人说话，必须按 (Sx) 角色：[Chinese] 原文 补台词块（R56）" % where)
+        return
+
+    last_shot = max((m.start() for m in RE_SHOT_TAG.finditer(detail)), default=-1)
+    if lines[0].start() < last_shot:
+        fails.append("%s 台词出现在镜头块之前；R56 要求所有台词集中在全部镜头之后（R56.9）" % where)
+
+    # 说话人 ID 按台词行顺序递增；同一角色多句各占一号（样本口径）
+    seq_bad = False
+    for i, m in enumerate(lines, 1):
+        sid = m.group(1)
+        if "," in sid:
+            continue
+        try:
+            num = int(sid[1:])
+        except ValueError:
+            seq_bad = True
+            break
+        if num != i:
+            seq_bad = True
+            break
+    if seq_bad:
+        fails.append("%s 台词行 (Sx) 没有按行从 (S1) 递增；同一角色多句也逐句各占一号（R56.9）" % where)
+
+    for m in lines:
+        role = re.sub(r"[（(]\s*VO\s*不张嘴\s*[）)]", "", m.group(2)).strip()
+        if names and role not in names and not any(n and n in role for n in names):
+            fails.append("%s 台词行说话人「%s」不在本段 Subject 图片中文名里（R20.3／R56）：%s" % (where, role, m.group(0).strip()[:50]))
+
+    if len(lines) >= 2 and "only the character who is speaking moves their lips" not in detail.lower():
         fails.append("%s 多人对话，detailed_description 没写「Only the character who is speaking moves their lips…」（R34 一人说时别人嘴不动）" % where)
+
     for line in detail.splitlines():
-        if RE_DIALOG_TAG.search(line):
+        if RE_SEG_DIALOGUE.match(line):
             continue
         clean = line
         for name in names:
             clean = clean.replace(name, "")
         if len(CJK.findall(clean)) >= 6:
-            fails.append("%s detailed_description 叙述句出现中文（除 <d> 内台词、画内可见引文与图片中文名外正文应为英文，R53）：%s"
+            fails.append("%s detailed_description 叙述句出现中文（除台词、画内可见引文与图片中文名外正文应为英文，R53）：%s"
                          % (where, line.strip()[:40]))
             break
-    if "says in an off-screen voiceover" in detail.lower() and "lips remain completely closed" not in detail:
-        fails.append("%s 画外音/独白没写 lips remain completely closed（R22 独白不张嘴）" % where)
+
+
+
 
 
 def check_segment_music(sec, where, fails):
@@ -407,8 +449,9 @@ def field_lines(body):
     """返回 {字段名: 该字段所在行之后到下一个字段之前的原文}。
     分段六段是裸字段行（subject_definitions: 等，无 `- ` 前缀），
     元数据字段取值必须在第一个裸字段行处截断，否则会把六段正文吞进元数据。"""
-    hits = list(re.finditer(r"^-\s*(%s)\s*[:：]" % "|".join(SHOT_FIELDS + SEG_FIELDS), body, re.M))
-    bare = list(re.finditer(r"^[a-z_]+\s*:\s*$", body, re.M))
+    body = _norm_md(body)
+    hits = list(re.finditer(r"^[*-]\s*(%s)\s*[:：]" % "|".join(SHOT_FIELDS + SEG_FIELDS), body, re.M))
+    bare = list(re.finditer(r"^[ \t]{0,6}[a-z_]+\s*:\s*$", body, re.M))
     d = {}
     for i, h in enumerate(hits):
         end = hits[i + 1].start() if i + 1 < len(hits) else len(body)

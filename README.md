@@ -12,17 +12,18 @@
 剧集/<EP>/人物资产.md       ← 先问 A／B／AB，只写你点的那层
 剧集/<EP>/场景资产.md       ← 十章结构，01–04 归 A、05–10 归 B
 剧集/<EP>/分镜.md          ← 九栏，每镜一条中文连续动作提示词（不写时间码）
-剧集/<EP>/分段视频提示词.md  ← 相邻镜打包成 4–15 秒生成段，按官方 Ref2VA 六段式落盘，正文英文、台词包 <d>、人景物写图片中文名，首镜无时间码、后续镜 At MM:SS.mmm
+剧集/<EP>/分段视频提示词.md  ← 相邻镜打包成 4–15 秒生成段，逐字照 references/分段模板.md（R56）：`*` 元数据六行、六段字段缩进、参考供给句、outside witness 开头、镜头块后置 `(Sx) 角色：[Chinese] 原文` 台词块
 ```
 
 ## 它和我改了什么
 
-- **时间码分两层（R13–R15／R18／R53）**：**分镜提示词不写时间码**，每镜从「起幅：」写起、按动作顺序连续写，不写 `0:00`、不按秒拆行；**分段提示词按官方 Ref2VA**，首镜 `[Shot 1]` 不写时间码，从 `[Shot 2]` 起写 `At MM:SS.mmm,`，切点严格递增且小于段长。镜长与段长只写在字段里的「镜长 N 秒」「时长 N 秒」。`check_rule.py` 对分镜查 `check_no_timecode`，对分段查 `check_official_timecodes`，两边分开判。
-- **分段改按官方 Ref2VA 六段式（R20／R20.3／R53／R54）**：所有分段一律按 `subject_definitions` → `summary` → `retention_analysis` → `detailed_description` → `overall_soundscape` → `non_diegetic_music` 六段落盘，字段写成 `subject_definitions:` 这种字段行，**六段之前不许再加中文约束段**。六段正文英文；台词、歌词、画面可见文字、以及本项目的图片中文名保留原语言并包进 `<d>[Language] 原文</d>`。`subject_definitions` 每条 `<Subject N>` 写成 `<Subject N>（图片名：方源）`，`summary`／`detailed_description` 正文一律写图片中文名、不写裸 `<Subject N>`／`<Picture N>`；`retention_analysis` 行首按 R54 写 `<Subject N>（图片名：…）`，这是唯一例外；标签只留定义行、`retention_analysis` 与元数据「标签映射」。`summary` 以方括号任务类型开头（如 `[reference generation]`）；人物、场景、道具的参考图只作主体来源时折进 `<Subject N>`，不单开 `<Picture N>`；只有首帧、尾帧、关键帧、构图锚点、故事板才单独定义 `<Picture N>`；没有视频输入不写 `video continuation`、不定义 `<Video N>`。`detailed_description` 通常 350–500 英文词，台词密集段优先排满发声时间。
+- **分段逐字照模板（R56，优先级最高）**：以用户 EP001 的 `分段视频提示词.md` 为唯一格式准绳，新增 `references/分段模板.md`。以后每集分段都写 `*` 元数据六行（时长／场景与轴线／表演参考／参考图／标签映射／说话人）；六段字段各缩进两个空格；`subject_definitions` 用固定参考供给句与 `main orientation`；`summary` 一句 `[reference generation] N shots ...`；`retention_analysis` 固定 `...: fully_preserved；head angle and eyeline are reblocked per shot; reference frontal orientation is not preserved.`；`detailed_description` 固定 `The scene is ... An outside witness records ... No subject looks into the lens ...` 开头，第二句 `Only the character who is speaking moves their lips; the rest keep lips closed.`；首镜 `[Shot 1]` 不写时间码，后续镜 `At MM:SS.mmm` 时间后不加逗号；台词全部放在镜头之后，每句 `(Sx) 角色：[Chinese] 原文`，同一角色多句各占一号；`non_diegetic_music` 写 `N/A`。旧 `<d>` 台词、350–500 词、旧 outside witness 句、`for this segment`、分段 `@Cxx` 全部作废。
+- **时间码分两层（R13–R15／R18／R53／R56）**：**分镜提示词不写时间码**，每镜从「起幅：」写起、按动作顺序连续写；**分段首镜 `[Shot 1]` 不写时间码，从 `[Shot 2]` 起写 `At MM:SS.mmm`（不加逗号）**，切点严格递增且小于段长。镜长与段长只写在字段里的「镜长 N 秒」「时长 N 秒」。`check_rule.py` 分镜查 `check_no_timecode`，分段查 `check_official_timecodes`。
+- **分段六段与图片中文名（R20／R20.3／R53／R54）**：六段顺序固定，六段前不许加中文约束段；叙述骨架英文，人物名、场景名、道具名、台词、屏显文字保留中文；`subject_definitions` 每条 `<Subject N>` 写成 `<Subject N>（图片名：方源）`，`summary`／`detailed_description` 正文一律写图片中文名、不写裸 `<Subject N>`／`<Picture N>`；`retention_analysis` 行首按 R54 写 `<Subject N>（图片名：…）`，这是唯一例外；人物、场景、道具参考图只作主体来源时折进 `<Subject N>`，只有首帧／尾帧／关键帧／构图锚点／故事板才单开 `<Picture N>`；没有视频输入不写 `video continuation`、不定义 `<Video N>`。
 - **参考图只继承身份，不继承正脸与视线（R54）**：参考图同时带身份（五官、发型、服装、体态）与画面（取景角度、头部朝向、视线、姿态），写作时只继承身份，画面信息由分镜重新指定。每个 `<Subject N>` 定义句写死 `The reference supplies facial identity, hair and costume only; pose, head angle and eyeline follow the shot description.` 并预声明主朝向；`detailed_description` 同时写「不看镜头」与「不复制参考图正面取向」两句；近景/中近景写 `pupils clearly off the lens axis`；机位优先越肩／三分之二侧／侧面／背面，禁正面平视，群像正面受光不超过一张，三分镜正面机位不超过一个；同一主体参考图≤3 张且上传顺序与编号一致；`retention_analysis` 加 `head angle and eyeline are reblocked...`，等级只用 `fully_preserved`／`weak_reference`。
 - **提示词方法论吸收（R55）**：复杂接触、拥抱、比武、兵器咬合、多人身体交叠、训练素材里少见的姿势，先在分镜指定关键帧再进分段；动作写成「谁施力→作用到谁→出现什么结果」，不许三条并列属性；形容词堆不出画面时换通用视觉概念或「具体动作＋定性词」，但禁用具体 IP 角色／演员／导演／品牌名作比；每镜先写人站哪、朝哪、起始动作，再写机位；披风／衣袖／头发写人物侧＋机位侧两套参数；具体动作之后才补定性词。投喂给模型的参考图必须单脸、短边≥1024、纯色背景、均匀柔光、中性表情、脸身分开，同一主体仍≤3 张；生图提示词不写「不要模糊／不要畸形／不要多余手指／8K／超清／大师之作／质感拉满」，H3 分段的英文否定约束句保留；远景认脸改用近景或单脸图；器材只写效果，不写品牌、机身、三脚架。详见 `references/提示词方法论.md`。
-- **分段里人物绝不对视镜头（R52／R54）**：镜头可以推近拍脸，也可以拍眼睛、给眼睛特写；但人物的眼睛不许看镜头，眼球、瞳孔、目光不许对准镜头。每个写到脸或特写的句子必须写「视线落在…」（对手的手／脸、门缝、剑柄、桌面、地面血、远处窗口）。`detailed_description` 风格句后固定写英文：`The camera observes as an outside witness; no subject looks into the lens, and no subject adopts the frontal gaze of the reference sheets. Every face is shown in profile or three-quarter view, with each eyeline fixed on an in-scene object, an opponent, or an off-screen story target.` 禁写看镜头、看向／望向／对着／盯住／锁住／找／迎／追／目视／注视镜头、看向观众；`check_rule.py` 的 `check_segment_gaze` 同时查双禁令与瞳孔方向，`GAZE_RE` 查看镜头措辞，但「镜头可拍眼睛」「人物眼睛不对镜头」不会误判。
-- **分段提示词不是分镜缩写（R51）**：`分段视频提示词.md` 是直接贴给 H3 的成稿，不许只剩「切镜＋台词」。分镜里的动作、动作先后、表情、自然规律、声音，必须在分段对应动作写得更具体：动作到关节／肌肉／承重，表情到眉／眼／嘴／下颌／喉／呼吸，视线有落点，道具写位移；同一画面多人各写各的，不许用「众人／群雄」一句带过。台词统一写 `方源(S1) says <d>[Chinese] 原文</d>`（说话人挂图片中文名），基础音色全片固定，情绪只改力度、速度、气息与尾音，不管多怒多怕，音色不许大幅变化；独白写 `says in an off-screen voiceover`，并在 `<d>` 后紧跟 `his/her lips remain completely closed`。环境声与动作声写进 `overall_soundscape`，配乐只放 `non_diegetic_music`（默认 `N/A`）。
+- **分段里人物绝不对视镜头（R52／R54）**：镜头可以推近拍脸，也可以拍眼睛、给眼睛特写；但人物的眼睛不许看镜头，眼球、瞳孔、目光不许对准镜头。每个写到脸或特写的句子必须写「视线落在…」（对手的手／脸、门缝、剑柄、桌面、地面血、远处窗口）。`detailed_description` 第一句固定写：`The scene is <场景>. An outside witness records ... No subject looks into the lens, and no subject adopts the frontal gaze of the reference sheets; everyone is held in profile or three-quarter view, pupils directed off frame at the opponent.` 禁写看镜头、看向／望向／对着／盯住／锁住／找／迎／追／目视／注视镜头、看向观众；`check_rule.py` 的 `check_segment_gaze` 同时查双禁令与瞳孔方向，`GAZE_RE` 查看镜头措辞，但「镜头可拍眼睛」「人物眼睛不对镜头」不会误判。
+- **分段提示词不是分镜缩写（R51）**：`分段视频提示词.md` 是直接贴给 H3 的成稿，不许只剩「切镜＋台词」。分镜里的动作、动作先后、表情、自然规律、声音，必须在分段对应动作写得更具体：动作到关节／肌肉／承重，表情到眉／眼／嘴／下颌／喉／呼吸，视线有落点，道具写位移；同一画面多人各写各的，不许用「众人／群雄」一句带过。台词统一写 `(Sx) 角色：[Chinese] 原文`（不用 `<d>`、不写 `says`），同一角色多句各占一号；基础音色全片固定，情绪只改力度、速度、气息与尾音；独白写 `(Sx) 角色（VO 不张嘴）：[Chinese] 原文`，闭唇句保证画面上不张嘴。环境声与动作声写进 `overall_soundscape`，配乐只放 `non_diegetic_music`（默认 `N/A`）。
 - **只有镜头去找人物，没有人物去找镜头（R49）**：机位在画外主动观察，可以推近、拉远、绕到侧面、从背后拍；人物不知道镜头在哪，也不因镜头出现改动作。人物视野不得与镜头发生关系——不直视／看向／望向／对着／盯住／锁住／找／迎／追镜头，不朝镜头演、不对镜头笑、不往镜头撞、不把脸转向镜头；每个人视线必须有落点（对手的手、门缝、剑柄、桌面、远处窗口、地面血迹）。分镜三层与分段动作句都守，资产图除外。
 - **分镜提示词按动作顺序写细（R50）**：每镜从「起幅：」起连续写，不写时间码；每个动作句写全七件事——谁＋锚点方位＋朝向与机位景别＋关节肌肉承重＋情绪与表情肌肉＋视线落点＋道具/光。台词单独占行，插在说话发生的那一步之后；不许「他看着」「她笑了」「气氛紧张」；任一动作句少于 15 个汉字就退回重写，`check_rule.py` 会报「提示词过短」。分段层按官方 Ref2VA，首镜无时间码、后续镜 `At MM:SS.mmm`，详细规则见第 20／21 条。
 - **表演参考按角色对号（R48）**：`references/表演参考/` 收了四套资料——微表情 36 条（哭 6／笑 5／综合 25）、镜头与光影（景别 7／构图 6／运镜 11／光 11／转场 7）、动作与肢体（8 类＋手部 10 式）、分镜与场景（宫格／60 秒与 90 秒骨架／现代 10／古装 10）。参考库只是参考：先判断这个角色、这个情境会不会这样做，会就取它的肌肉顺序与节拍，改写成这个角色的具体动作、幅度、速度与破功点，写进分镜或分段动作句；不会就换一条或自拟。不整条照搬、不贴条目名、不一套模板套所有人；交付报告写「参考命中／参考未覆盖」。参考不改 4–15 秒段长、220–260 秒一集、九栏、不写时间码、台词与不配乐；资产图不受限。
@@ -46,7 +47,7 @@
 - **进来先问一句（R33）**：小说一到先问「先生成剧本，还是跳过剧本直接往下」。选跳过就不出 `剧本.md`，直接按小说切场结果写资产与分镜，分镜场标题写小说位置（`来源：第 3 章 第 2 段`）；自检加 `--skip-script`。
 - **任何小说都能直接开跑（R32）**：剧本、小说、网文、整本书、某一章都收，不必先有场次格式；收到后先切场（一段叙述群＝一场，地点／时间／在场人一变就新场）、把叙述改成可拍的动作陈述句、把引号里的说话原样落成 `角色：台词`、把心理描写转成 `V1-VO` 内心或写进表情栏，叙述性旁白不进提示词；小说没写的人物和道具不编。整本按集切，跨集编号、基础声、槽号顺延。
 
-- **提示词分两层写**：分镜层仍是中文连续动作白话，从「起幅：」起按动作顺序连续写、不写时间码，直接贴 Base／首帧模式就能生成；分段层按官方 Ref2VA 六段式落盘，正文英文、台词包 `<d>`、首镜无时间码、后续镜 `At MM:SS.mmm`，这是本轮替换的重点。
+- **提示词分两层写**：分镜层仍是中文连续动作白话，从「起幅：」起按动作顺序连续写、不写时间码，直接贴 Base／首帧模式就能生成；分段层逐字照 `references/分段模板.md`（R56），`*` 元数据六行、六段缩进、台词块 `(Sx) 角色：[Chinese] 原文`、首镜无时间码、后续镜 `At MM:SS.mmm`，这是本轮替换的重点。
 - **九栏固定**：拍摄手法／动作／动作先后／表情／自然规律／声音／台词／参考图／提示词，顺序不动。
 - **表情分两层**：先一句情绪定调（什么情绪、几成、冲着谁），再写这份情绪对应的肌肉与关节。
 - **动作写到关节与肌肉**：明写哪只手、怎么抬、承重点在哪。
@@ -59,9 +60,10 @@
 
 ```
 阿良的分镜制作规则/
-├── SKILL.md                     # 总控：R1–R55 + 流程 + 21 题材速查
+├── SKILL.md                     # 总控：R1–R56 + 流程 + 21 题材速查
 ├── references/
-│   ├── 制作规则原文.md           # 主规则原文（55 条，R1–R55）
+│   ├── 制作规则原文.md           # 主规则原文（56 条，R1–R56）
+│   ├── 分段模板.md               # R56 分段唯一格式准绳（用户 EP001 样本全文）
 │   ├── Ref2VA官方规范.md         # 官方 MiniMax-H3 Ref2VA 六段式硬规范与本项目映射
 │   ├── 视线与朝向控制规范.md     # R54 参考图只继承身份、不继承正脸与视线
 │   ├── 提示词方法论.md           # R55 关键帧／因果链／概念包／投喂图／负面改正面
@@ -99,7 +101,7 @@
 python scripts/check_rule.py --project <项目目录> --ep EP001
 ```
 
-它查的是能机械判定的事：四份齐全、九栏是否齐、分镜有没有时间码、分段是否六段齐全且首镜无时间码/后续镜 `At MM:SS.mmm` 严格递增、段长是否 4–15、合计是否相等、`@C01` 有没有空悬、台词是否只说一遍、`non_diegetic_music` 是否 `N/A` 或用户指定、画风是否只用了「人物一句＋场景道具一句」两句锁并按小节对号、每条提示词有没有带 `画风 按 REF-…：` 尾巴、分镜与分段有没有「看镜头」写法、分镜提示词有没有「过短」动作句、分段 `detailed_description` 有没有 outside witness 英文句、`summary` 有没有方括号任务类型、有没有把人物图误当独立 `<Picture>`、台词有没有挂 `(Sx)` 并包 `<d>`、正文是不是英文、正文有没有用图片中文名而不写裸标签、生图提示词有没有「8K／超清／大师之作／不要模糊」等 R55 禁用词。写死的东西它管不了的部分，走人工核对 31 条。
+它查的是能机械判定的事：四份齐全、九栏是否齐、分镜有没有时间码、分段是否六段齐全且首镜无时间码/后续镜 `At MM:SS.mmm` 严格递增、段长是否 4–15、合计是否相等、`@C01` 有没有空悬、台词是否只说一遍、`non_diegetic_music` 是否 `N/A` 或用户指定、画风是否只用了「人物一句＋场景道具一句」两句锁并按小节对号、每条提示词有没有带 `画风 按 REF-…：` 尾巴、分镜与分段有没有「看镜头」写法、分镜提示词有没有「过短」动作句、分段 `detailed_description` 有没有 outside witness 英文句、`summary` 有没有方括号任务类型、有没有把人物图误当独立 `<Picture>`、台词是不是 `(Sx) 角色：[Chinese] 原文`（不再接受 `<d>`）、正文是不是英文、正文有没有用图片中文名而不写裸标签、生图提示词有没有「8K／超清／大师之作／不要模糊」等 R55 禁用词。写死的东西它管不了的部分，走人工核对 32 条。
 
 ## 题材：四大类、21 个
 
