@@ -761,9 +761,9 @@ def check_line_order(field, where, label, fails):
 
 
 def check_style(texts, fails):
-    """R31＋R47：人物画风只问一次，未另行指定就用默认 REF-900；场景与道具再问一次。
+    """R31＋R47：人物画风只问一次，未另行指定用默认 REF-900；场景道具也只问一次，未另行指定用默认 REF-902。
     允许一集两句锁：人物一句（REF-900 默认／REF-001 用户图／REF-000 文字），
-    场景与道具一句（REF-002，可沿用同号）。
+    场景与道具一句（REF-902 默认／REF-002 用户给，可沿用人物号）。
     人物资产.md 用人物号；场景资产.md 用场景道具号；资产提示词.md 按小节分别对号；
     每条带「提示词」的条目都要有 `画风 按 REF-xxx：` 尾巴，且必须与所在层对号。"""
     def codes_of(txt):
@@ -775,7 +775,7 @@ def check_style(texts, fails):
         if cs:
             decls[name] = cs
     if not decls:
-        fails.append("三份资产文件都没有「画风：REF-900 内置默认人物画风 · …」或「画风：REF-001 用户参考图 · …」声明：人物画风未落盘（R31／R47）")
+        fails.append("三份资产文件都没有画风声明：人物应先落「REF-900 内置默认人物画风」或「REF-001 用户参考图」，场景道具应落「REF-902 内置默认场景道具画风」或「REF-002 用户参考图」（R31／R47）")
         return ""
 
     all_codes = sorted({c for cs in decls.values() for c in cs})
@@ -783,14 +783,16 @@ def check_style(texts, fails):
         fails.append("画风声明超过两句锁：%s（一集最多「人物一句＋场景道具一句」，R47）"
                      % "、".join(all_codes))
 
-    # 人物号与场景道具号：REF-900 是内置默认人物锁，出现时优先当人物号；
-    # 否则按声明里出现的第一个当人物，第二个当场景／道具。
+    # 人物号：REF-900 是内置默认人物锁，出现时优先；否则取第一个不是 REF-902 的编号。
+    # 场景道具号：REF-902 是内置默认场景道具锁，出现时优先；否则取不同于人物号的编号。
     if "REF-900" in all_codes:
         char_code = "REF-900"
-        scene_code = next((c for c in all_codes if c != char_code), char_code)
     else:
-        char_code = all_codes[0]
-        scene_code = all_codes[1] if len(all_codes) > 1 else char_code
+        char_code = next((c for c in all_codes if c != "REF-902"), all_codes[0])
+    if "REF-902" in all_codes:
+        scene_code = "REF-902"
+    else:
+        scene_code = next((c for c in all_codes if c != char_code), char_code)
 
     for name, cs in decls.items():
         if len(cs) > 1 and name != "资产提示词.md":
