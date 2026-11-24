@@ -503,6 +503,25 @@ def check_assets(asset_txt, fails):
     return defined
 
 
+def check_prompt_terms(txt, where, fails):
+    """R55.8/R55.10：生图提示词不许写画面负面词、8K 装饰词与实体器材名。"""
+    if not txt:
+        return
+    banned = ("8K", "8k", "超清", "大师之作", "质感拉满",
+              "不要模糊", "不要畸形", "不要多余手指", "不要四仰八叉")
+    hits = 0
+    for line in txt.splitlines():
+        if "提示词" not in line:
+            continue
+        for term in banned:
+            if term in line:
+                hits += 1
+                fails.append("%s 生图提示词出现 R55 禁用词「%s」：%s"
+                             % (where, term, line.strip()[:60]))
+    if hits > 3:
+        fails.append("%s 另有 %d 处 R55 禁用词，未逐条列出（R55）" % (where, hits - 3))
+
+
 def check_ids(text, where, defined, fails):
     """R27：@C／@S／@P 格式（两位数字、编号后留一格空格）与悬空引用。"""
     bad_fmt, undefined = set(), set()
@@ -917,6 +936,7 @@ def main():
         if not asset_p.is_file():
             fails.append("缺文件：资产提示词.md（人物／场景／道具三节，带 C／S／P 编号）（R27）")
         defined = check_assets(asset_txt, fails)
+        check_prompt_terms(asset_txt, "资产提示词.md", fails)
         script_anchors, board_anchors = set(), set()
         if script_txt:
             check_standing(split_blocks(script_txt, RE_SCENE_ID), "剧本.md", defined, fails, warns, script_anchors)
@@ -935,6 +955,7 @@ def main():
     if char_p.is_file():
         char_txt = read_text(char_p)
         cids = check_char_assets(char_txt, fails, warns)
+        check_prompt_terms(char_txt, "人物资产.md", fails)
         notes["char_ids"] = len(cids)
         cm = RE_CHAR_CHOICE.search(char_txt)
         notes["char_choice"] = cm.group(1).strip().upper() if cm else "?"
@@ -942,6 +963,7 @@ def main():
     if scene_p.is_file():
         scene_txt = read_text(scene_p)
         sids = check_scene_assets(scene_txt, fails, warns)
+        check_prompt_terms(scene_txt, "场景资产.md", fails)
         notes["scene_ids"] = len(sids)
         sm2 = RE_CHAR_CHOICE.search(scene_txt)
         notes["scene_choice"] = sm2.group(1).strip().upper() if sm2 else "?"
