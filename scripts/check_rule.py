@@ -40,7 +40,8 @@ RE_EXIT = re.compile(r"^[ \t]{0,8}Exit[：:]\s", re.M)
 # R57：转场六选一；黑场／闪白／叠化／淡入淡出默认禁用
 TRANSITION_WORDS = ("同向运镜", "动作匹配", "遮挡", "出入画", "光影过渡", "硬切",
                     "push-in", "pull-out", "push in", "pull out", "pan", "tracking",
-                    "match cut", "action match", "occlusion", "wipe", "hard cut", "tilt")
+                    "match cut", "action match", "occlusion", "wipe", "hard cut", "tilt",
+                    "seamless")
 TRANSITION_BAN = ("黑场", "闪白", "叠化", "淡入淡出", "淡出")
 
 SHOT_FIELDS = ["拍摄手法", "动作", "动作先后", "表情", "自然规律", "声音", "台词", "参考图", "提示词"]
@@ -344,6 +345,8 @@ def check_segment_dialogue(sec, where, fails, warns=None):
             continue
         if RE_ENTRY.match(line) or RE_EXIT.match(line):
             continue
+        if re.match(r"^[ \t]{0,8}Transition\s+(?:out|in)[:：]", line, re.I):
+            continue
         clean = line
         for name in names:
             clean = clean.replace(name, "")
@@ -435,6 +438,8 @@ def check_transitions(pr_pairs, seg_pairs, allow_transition, fails, warns):
             m = RE_EXIT.search(d)
             if m:
                 tail = (d[m.end():].split("\n")[0] or "")
+                if "episode ends" in tail.lower():
+                    continue
                 if not any(k in tail for k in TRANSITION_WORDS):
                     warns.append(where + "：`Exit:` 没写清单内的交接方式，请确认（R57）")
 
@@ -1063,6 +1068,57 @@ def check_vfx(script_txt, board_txt, seg_txt, fails, warns):
     return total
 
 
+def check_seam(seg_detail_pairs, fails, warns):
+    """R60：相邻段之间必须二选一——A 无缝接（两段都写 hand-off seamless），
+    或 B 显式转场（前段 Transition out: 方式 — 可见动作；后段 Transition in: 同一方式）。"""
+    if len(seg_detail_pairs) < 2:
+        return 0
+    declared_any = any(("seamless" in d) or ("Transition out:" in d) or ("Transition in:" in d)
+                       for _, d in seg_detail_pairs)
+    pairs = 0
+    issues = []
+    for i in range(len(seg_detail_pairs) - 1):
+        (w1, d1), (w2, d2) = seg_detail_pairs[i], seg_detail_pairs[i + 1]
+        pairs += 1
+        seamless = ("seamless" in d1) and ("seamless" in d2)
+        out_m = re.search(r"Transition out:\s*([^\n]+)", d1)
+        in_m = re.search(r"Transition in:\s*([^\n]+)", d2)
+        if out_m and in_m:
+            m1 = re.split(r"[—–]", out_m.group(1))[0].strip().strip("，,;；:：")
+            m2 = re.split(r"[—–]", in_m.group(1))[0].strip().strip("，,;；:：")
+            # 方式只取方法名：`cut — to 场景`／`cut to 场景` 都归一到 `cut`
+            m1 = re.sub(r"\s*(?:to|from|到|从)\s+.*$", "", m1).strip()
+            m2 = re.sub(r"\s*(?:to|from|到|从)\s+.*$", "", m2).strip()
+            if m1 and m2 and (m1 not in m2) and (m2 not in m1):
+                issues.append("%s 的 `Transition out:` 方式「%s」与 %s 的 `Transition in:` 方式「%s」不一致；两行必须同名（R60）"
+                              % (w1, m1, w2, m2))
+            if re.search(r"Transition out:[^\n]*[—–][^\n]*", d1) is None:
+                issues.append("%s 的 `Transition out:` 只有方式、没写看得见的转场动作；要写成「方式 — 甩镜／前景遮挡／推入虚焦／光效吞满」这样的一拍（R60）" % w1)
+            if re.search(r"Transition in:[^\n]*[—–][^\n]*", d2) is None:
+                issues.append("%s 的 `Transition in:` 只有方式、没写从什么画面进来；要写成「方式 — 从哪个画面进来」（R60）" % w2)
+            continue
+        if seamless:
+            continue
+        if out_m or in_m:
+            issues.append("%s → %s 的段间转场只写了一半：`Transition out:` 在前段、`Transition in:` 在后段，两段都要写（R60）"
+                          % (w1, w2))
+        else:
+            issues.append("%s → %s 没写段间衔接：要么两段都写 `hand-off seamless`（A 无缝接），要么前段 `Exit` 后写 `Transition out: <方式> — <看得见的转场动作>`、后段 `Entry` 后写 `Transition in: <同一方式>`；只在 Exit 里写 hard cut 不算（R60）"
+                          % (w1, w2))
+    if declared_any:
+        fails.extend(issues)
+        a_cnt = sum(1 for i in range(len(seg_detail_pairs) - 1)
+                    if "seamless" in seg_detail_pairs[i][1] and "seamless" in seg_detail_pairs[i + 1][1])
+        b_cnt = sum(1 for i in range(len(seg_detail_pairs) - 1)
+                    if "Transition out:" in seg_detail_pairs[i][1] and "Transition in:" in seg_detail_pairs[i + 1][1])
+        warns.append("段间衔接（R60）：%d 对相邻段，A 无缝接 %d 处、B 显式转场 %d 处" % (pairs, a_cnt, b_cnt))
+        if pairs and b_cnt > pairs / 2:
+            warns.append("B 显式转场 %d 处，超过段间数量一半；同场能无缝就优先走 A（R60.7）" % b_cnt)
+    else:
+        warns.append("整份分段没有段间衔接声明（`hand-off seamless` 或 `Transition out:`／`Transition in:`），%d 对相邻段按旧稿不回溯；新写的段必须按 R60 二选一：同场写 A 无缝接，换场写 B 显式转场（只写 hard cut 不算）" % pairs)
+    return pairs
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--project", required=True)
@@ -1325,6 +1381,9 @@ def main():
     # ---------- 转场（R57） ----------
     allow_trans = args.allow_transition or ("用户指定转场" in script_txt) or ("转场（用户指定" in board_txt) or ("转场（用户指定" in seg_txt)
     check_transitions(shot_pr_pairs, seg_detail_pairs, allow_trans, fails, warns)
+
+    # ---------- 段间衔接（R60） ----------
+    notes["seams"] = check_seam(seg_detail_pairs, fails, warns)
 
     # ---------- 特效（R59） ----------
     notes["vfx"] = check_vfx(script_txt, board_txt, seg_txt, fails, warns)
