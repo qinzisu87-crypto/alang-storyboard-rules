@@ -35,6 +35,13 @@ RE_SEG_DIALOGUE = re.compile(r"^\s{2,}\((S\d+(?:,S\d+)*)\)\s+([^：:\n]{1,20})[�
 RE_DIALOG_TAG = re.compile(r"<d>\s*\[[^\]]+\][^<]*</d>")
 MD_ESC = re.compile(r"\\([_<>\[\]])")
 TIME_CODE_RE = re.compile(r"(?<!\d)(\d{1,2}):(\d{2})(?!\d)")
+RE_ENTRY = re.compile(r"^[ \t]{0,8}Entry[：:]\s", re.M)
+RE_EXIT = re.compile(r"^[ \t]{0,8}Exit[：:]\s", re.M)
+# R57：转场六选一；黑场／闪白／叠化／淡入淡出默认禁用
+TRANSITION_WORDS = ("同向运镜", "动作匹配", "遮挡", "出入画", "光影过渡", "硬切",
+                    "push-in", "pull-out", "push in", "pull out", "pan", "tracking",
+                    "match cut", "action match", "occlusion", "wipe", "hard cut", "tilt")
+TRANSITION_BAN = ("黑场", "闪白", "叠化", "淡入淡出", "淡出")
 
 SHOT_FIELDS = ["拍摄手法", "动作", "动作先后", "表情", "自然规律", "声音", "台词", "参考图", "提示词"]
 # 分段元数据行（供审阅对账，不贴给工具）；可贴给工具的六段标题在 SEG_SECTIONS 里单独校验
@@ -335,6 +342,8 @@ def check_segment_dialogue(sec, where, fails, warns=None):
     for line in detail.splitlines():
         if RE_SEG_DIALOGUE.match(line):
             continue
+        if RE_ENTRY.match(line) or RE_EXIT.match(line):
+            continue
         clean = line
         for name in names:
             clean = clean.replace(name, "")
@@ -398,6 +407,45 @@ def check_camera_gaze(text, where, fails):
     return len(hits)
 
 
+def check_transitions(pr_pairs, seg_pairs, allow_transition, fails, warns):
+    """R57：分镜每镜写「承接：」／「转场出：」，分段每段写 Entry:／Exit: 且段段成对。
+    整份文件没有任何转场标记的旧稿只 WARN（不回溯），新写的镜／段缺行即 FAIL。"""
+    board_marked = any("转场出" in pr for _, pr in pr_pairs)
+    if pr_pairs and not board_marked:
+        warns.append("分镜：整份没有「转场出：」标记，按旧稿不回溯保留；新写的镜要在「提示词」首行写 `承接：`、末行写 `转场出：<方式>｜末帧：<状态>｜接：<下一镜要接的五项>`（R57）")
+    elif board_marked:
+        for where, pr in pr_pairs:
+            if "承接：" not in pr and "承接:" not in pr:
+                fails.append(where + "：提示词缺「承接：」行（R57：本集首镜写「本集开篇，首帧状态」，同场接下镜写上一镜末帧的姿势／重心／手持物／朝向／光位，跨场写「hard cut 至 场名，不沿用上一场轴线」）")
+            if "转场出：" not in pr and "转场出:" not in pr:
+                fails.append(where + "：提示词缺「转场出：」行（R57：应写「<方式>｜末帧：<定格状态>｜接：<下一镜要接的五项>」）")
+            m = re.search(r"转场出[：:]([^\n]*)", pr)
+            if m and not any(k in m.group(1) for k in TRANSITION_WORDS):
+                warns.append(where + "：「转场出」没写清单内的方式（同向运镜／动作匹配／遮挡转场／出入画跟随／光影过渡／跨场硬切），请确认（R57）")
+
+    seg_marked = any(RE_ENTRY.search(d) or RE_EXIT.search(d) for _, d in seg_pairs)
+    if seg_pairs and not seg_marked:
+        warns.append("分段：整份没有 `Entry:`／`Exit:`，按旧稿不回溯保留；新写的段要在 detailed_description 里镜头块前写 Entry、末镜之后台词块之前写 Exit（R57）")
+    elif seg_pairs:
+        for where, d in seg_pairs:
+            if not RE_ENTRY.search(d):
+                fails.append(where + "：detailed_description 缺 `Entry:`（R57：写上一段末帧状态，首拍只停不新起动作）")
+            if not RE_EXIT.search(d):
+                fails.append(where + "：detailed_description 缺 `Exit:`（R57：写定格状态＋停留三五帧＋交接方式，本集末段写 held to the last frame）")
+            m = RE_EXIT.search(d)
+            if m:
+                tail = (d[m.end():].split("\n")[0] or "")
+                if not any(k in tail for k in TRANSITION_WORDS):
+                    warns.append(where + "：`Exit:` 没写清单内的交接方式，请确认（R57）")
+
+    if not allow_transition:
+        for where, txt in list(pr_pairs) + list(seg_pairs):
+            for w in TRANSITION_BAN:
+                if w in txt:
+                    fails.append(where + "：出现「" + w + "」；黑场／闪白／叠化／淡入淡出默认禁用，只有用户当次点名才写（R57）")
+                    break
+
+
 def check_prompt_detail(pr, where, fails):
     """R50：分镜提示词按动作顺序写细。缺起幅、动作句过短即 FAIL。"""
     lines = [l.strip() for l in pr.splitlines() if not DIALOGUE_LINE.match(l.strip())]
@@ -410,7 +458,7 @@ def check_prompt_detail(pr, where, fails):
         bad += 1
     short = 0
     for l in lines:
-        if l.startswith(("切：", "切:", "转场")):
+        if l.startswith(("切：", "切:", "转场", "承接")):
             continue
         n = len(CJK.findall(l))
         if n < 15:
@@ -1024,6 +1072,7 @@ def main():
         notes["style"] = style
 
     board_prompt_all = []
+    shot_pr_pairs = []
     shot_durs = {}
     stray = []
     for s in shots:
@@ -1035,6 +1084,7 @@ def main():
                 fails.append("%s 缺「%s」栏" % (where, name))
         pr = prompt_text(f)
         board_prompt_all.append(pr)
+        shot_pr_pairs.append((where, pr))
         check_prompt_detail(pr, where, fails)
         check_no_timecode(pr, where, fails)
         dur = shot_duration(f)
@@ -1094,6 +1144,7 @@ def main():
         fails.append("分段视频提示词.md 未找到段标题（应为「## 第 N 段 ｜ 场名」）")
 
     seg_prompt_all = []
+    seg_detail_pairs = []
     seg_durs = []
     for g in segs:
         num = g["m"].group(1)
@@ -1105,6 +1156,7 @@ def main():
         sec = check_segment_sections(g["body"], where, fails, warns)
         detail = sec.get("detailed_description", "")
         seg_prompt_all.append(detail)
+        seg_detail_pairs.append((where, detail))
         check_segment_dialogue(sec, where, fails)
         check_segment_music(sec, where, fails)
         check_segment_gaze(sec, where, fails)
@@ -1128,6 +1180,10 @@ def main():
         scene_txt = f.get("场景与轴线", "")
         if ("转场" in scene_txt) and not re.search(r"hard cut|cuts to|transitions to", detail, re.I):
             fails.append("%s 声明了转场，但 detailed_description 切点没写 hard cut / cuts to（R19）" % where)
+
+    # ---------- 转场（R57） ----------
+    allow_trans = ("用户指定转场" in script_txt) or ("转场（用户指定" in board_txt) or ("转场（用户指定" in seg_txt)
+    check_transitions(shot_pr_pairs, seg_detail_pairs, allow_trans, fails, warns)
 
     # ---------- 跨文件 ----------
     board_total = sum(v for v in shot_durs.values() if v)
@@ -1200,6 +1256,7 @@ HUMAN = [
     "场景资产是否只出了用户点的那层，A2–A4 每条是否可粘提示词带图槽，A3 布局图里画不画得出锚点物，B6 空间规则与 R26 站位是否一致（R29）",
     "三类资产是否都只交了提示词与槽号，没有图片文件、路径或「已出图」说法，交付报告没把提示词说成图片已生成（R30）",
     "每段段数是否由镜长决定，不是硬凑",
+    "转场（R57）：每镜「转场出」的末帧状态与下一镜「承接」的五项（动作／朝向／重心／手持物／光位）是否真对得上；前段 Exit 与后段 Entry 的方式与末帧是否同一套说法；是否出现黑场／闪白／叠化／淡入淡出，或转场遮脸遮嘴、拦腰打断正在说的台词",
 ]
 
 
