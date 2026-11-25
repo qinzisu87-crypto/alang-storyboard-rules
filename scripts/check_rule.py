@@ -448,7 +448,7 @@ def check_transitions(pr_pairs, seg_pairs, allow_transition, fails, warns):
 
 def check_prompt_detail(pr, where, fails):
     """R50：分镜提示词按动作顺序写细。缺起幅、动作句过短即 FAIL。"""
-    lines = [l.strip() for l in pr.splitlines() if not DIALOGUE_LINE.match(l.strip())]
+    lines = [re.sub(r"^[*-]\s+", "", l.strip()) for l in pr.splitlines() if not DIALOGUE_LINE.match(l.strip())]
     lines = [l for l in lines if l and not l.startswith("约束")]
     if not lines:
         return 0
@@ -934,12 +934,58 @@ def check_handoff(project, ep, fails, warns, require=False):
         warns.append("项目交接.md 里没有 %s 的记录，做完这一集要补一节（R45）" % ep)
 
 
+PLACEHOLDER_RE = re.compile(r"(人物|场景|道具)[一二三四五六七八九十]{1,3}")
+REAL_ID_RE = re.compile(r"@(?:C|S|P)\d{2}")
+
+
+def check_placeholders(shots, board_txt, seg_txt, fails, warns):
+    """R58：反推没有实拍资产图，图槽一律写人物一／场景一／道具一占位，不编 C／S／P 真编号。"""
+    for name, txt in (("分镜.md", board_txt), ("分段视频提示词.md", seg_txt)):
+        if "已出图" in txt or "见附图" in txt:
+            fails.append("%s 出现「已出图」／「见附图」；反推只交提示词与占位，不出图、不暗示有图（R58／R30）" % name)
+        ids = REAL_ID_RE.findall(txt)
+        if ids:
+            fails.append("%s 出现 %d 处 C／S／P 真编号（如 %s）；反推时没有资产表，图槽必须改写成占位名（R58）"
+                         % (name, len(ids), ids[0]))
+    names = set()
+    for s in shots:
+        sid = s["m"].group(1)
+        where = "镜头 %s" % sid
+        ref = field_lines(s["body"]).get("参考图", "")
+        found = [m.group(0) for m in PLACEHOLDER_RE.finditer(ref)]
+        for f in found:
+            names.add(f)
+        if "无" in ref and not found and "@图片" not in ref:
+            continue
+        if not found:
+            fails.append("%s「参考图」栏没有占位名（应写 `@图片 N 人物一（空缺占位）`／`场景一（空缺占位）`／`道具一（空缺占位）`，R58）" % where)
+    if not names:
+        warns.append("分镜.md 里没有任何 `人物一／场景一／道具一` 占位名；若本片确有主体入画，按 R58 补占位并顺排人物二、场景二")
+    else:
+        warns.append("反推占位：人物 %d 名、场景 %d 名、道具 %d 名（人物：%s／场景：%s／道具：%s）"
+                     % (len([n for n in names if n.startswith("人物")]),
+                        len([n for n in names if n.startswith("场景")]),
+                        len([n for n in names if n.startswith("道具")]),
+                        "、".join(sorted(n for n in names if n.startswith("人物"))) or "—",
+                        "、".join(sorted(n for n in names if n.startswith("场景"))) or "—",
+                        "、".join(sorted(n for n in names if n.startswith("道具"))) or "—"))
+    if "空缺占位" not in board_txt:
+        warns.append("分镜.md 的图槽没写「（空缺占位）」标注；建议在每个 `@图片 N 人物一` 后补这四个字，方便后续挂真图（R58）")
+    for n in sorted(names):
+        if n not in seg_txt:
+            warns.append("占位名「%s」在 分段视频提示词.md 里没出现；分段的 `<Subject N>（图片名：…）` 要与分镜占位同名（R58）" % n)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--project", required=True)
     ap.add_argument("--ep", default="EP001")
     ap.add_argument("--skip-script", action="store_true", help="R33 跳过剧本模式：不要求 剧本.md")
     ap.add_argument("--require-handoff", action="store_true", help="R45：缺少或不完整的 项目交接.md 直接判 FAIL")
+    ap.add_argument("--reverse", action="store_true",
+                    help="R58 视频反推模式：只要求 分镜.md 与 分段视频提示词.md，不要求剧本与三类资产；另查占位命名（人物一／场景一／道具一）")
+    ap.add_argument("--allow-transition", action="store_true",
+                    help="放行黑场／闪白／叠化／淡入淡出（只在反推原片本身用了这些转法时用）")
     args = ap.parse_args()
 
     project = pathlib.Path(args.project)
@@ -957,7 +1003,7 @@ def main():
     asset_p = ep_dir / "资产提示词.md"
     char_p = ep_dir / "人物资产.md"
     scene_p = ep_dir / "场景资产.md"
-    required = [board_p, seg_p] + ([] if args.skip_script else [script_p])
+    required = [board_p, seg_p] + ([] if (args.skip_script or args.reverse) else [script_p])
     for p in required:
         if not p.is_file():
             fails.append("缺少文件：%s" % p.name)
@@ -976,6 +1022,9 @@ def main():
         gaze_total += check_camera_gaze(txt, name, fails)
     notes["camera_gaze"] = gaze_total
 
+    if args.reverse:
+        notes["reverse"] = True
+        warns.append("反推模式（R58）：只校验 分镜.md 与 分段视频提示词.md；剧本、三类资产、项目交接均不要求。交付只许给这两份。")
     # ---------- 剧本 ----------
     if args.skip_script and not script_txt:
         notes["script_skipped"] = True
@@ -1023,7 +1072,9 @@ def main():
     # ---------- 资产表、编号与站位锚点（R26–R27） ----------
     legacy = (not asset_p.is_file()) and ("场景站位" not in script_txt)
     defined = set()
-    if legacy:
+    if args.reverse:
+        notes["assets"] = 0
+    elif legacy:
         warns.append("本集既无 资产提示词.md 也无「场景站位」，按「不回溯」当作旧版文件，跳过 R26／R27；新集必须写。")
     else:
         if not asset_p.is_file():
@@ -1042,8 +1093,11 @@ def main():
         check_ids(board_txt, "分镜.md", defined, fails)
         check_ids(seg_txt, "分段视频提示词.md", defined, fails)
     notes["assets"] = len(defined)
-    check_coverage(script_txt, board_txt, seg_txt, asset_txt, defined, fails, warns)
-    check_handoff(project, args.ep, fails, warns, require=args.require_handoff)
+    if args.reverse:
+        check_placeholders(shots, board_txt, seg_txt, fails, warns)
+    else:
+        check_coverage(script_txt, board_txt, seg_txt, asset_txt, defined, fails, warns)
+        check_handoff(project, args.ep, fails, warns, require=args.require_handoff)
 
     if char_p.is_file():
         char_txt = read_text(char_p)
@@ -1067,7 +1121,7 @@ def main():
         texts["人物资产.md"] = read_text(char_p)
     if scene_p.is_file():
         texts["场景资产.md"] = read_text(scene_p)
-    style = check_style(texts, fails)
+    style = "" if args.reverse else check_style(texts, fails)
     if style:
         notes["style"] = style
 
@@ -1182,7 +1236,7 @@ def main():
             fails.append("%s 声明了转场，但 detailed_description 切点没写 hard cut / cuts to（R19）" % where)
 
     # ---------- 转场（R57） ----------
-    allow_trans = ("用户指定转场" in script_txt) or ("转场（用户指定" in board_txt) or ("转场（用户指定" in seg_txt)
+    allow_trans = args.allow_transition or ("用户指定转场" in script_txt) or ("转场（用户指定" in board_txt) or ("转场（用户指定" in seg_txt)
     check_transitions(shot_pr_pairs, seg_detail_pairs, allow_trans, fails, warns)
 
     # ---------- 跨文件 ----------
@@ -1191,8 +1245,8 @@ def main():
     if shots and segs and board_total != seg_total:
         fails.append("分镜合计 %d 秒 vs 分段合计 %d 秒，不相等" % (board_total, seg_total))
 
-    # R37：一集 4 分钟（240 秒，落 220–260 秒）；剧本头部「用户指定 N 秒」为用户改口径豁免
-    if seg_durs:
+    # R57/R58：反推按原片时长，不套一集 220–260 秒口径
+    if seg_durs and not args.reverse:
         user_sec = re.search(r"用户指定\s*(\d+)\s*秒", script_txt)
         if user_sec:
             if seg_total != int(user_sec.group(1)):
@@ -1211,7 +1265,7 @@ def main():
 
     board_p = "\n".join(board_prompt_all)
     seg_p = "\n".join(seg_prompt_all)
-    for spk, txt in dialogue:
+    for spk, txt in ([] if args.reverse else dialogue):
         gap = txt
         if len(gap) < 2:
             continue
