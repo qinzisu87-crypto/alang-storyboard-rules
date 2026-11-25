@@ -976,6 +976,93 @@ def check_placeholders(shots, board_txt, seg_txt, fails, warns):
             warns.append("占位名「%s」在 分段视频提示词.md 里没出现；分段的 `<Subject N>（图片名：…）` 要与分镜占位同名（R58）" % n)
 
 
+VFX_KEYS = ("形态", "光源", "起", "中", "收")
+VFX_BANNED = ("炫酷", "特效拉满", "光效强烈", "光效拉满", "特效炸裂", "大片感特效")
+
+
+def check_vfx(script_txt, board_txt, seg_txt, fails, warns):
+    """R59：有特效的场，[VFX] 五段写全、[SFX] 一特效一行、[LIGHT] 不缺席，特效词进分镜与分段。"""
+    if not script_txt:
+        return 0
+    scenes = []
+    cur = None
+    for line in script_txt.splitlines():
+        m = RE_SCENE_ID.match(line)
+        if m:
+            cur = [m.group(1), []]
+            scenes.append(cur)
+            continue
+        if line.startswith("## "):
+            cur = None
+            continue
+        if cur is not None:
+            cur[1].append(line)
+
+    total = 0
+    for sid, lines in scenes:
+        vfx = [l.strip() for l in lines if l.strip().startswith("[VFX]")]
+        sfx = [l.strip() for l in lines if l.strip().startswith("[SFX]")]
+        light = [l.strip() for l in lines if l.strip().startswith("[LIGHT]")]
+        if not vfx:
+            continue
+        total += len(vfx)
+        if len(vfx) > 4:
+            fails.append("%s 有 %d 条 [VFX]，一场超过 4 个特效；拆场或并成同一条（R59.2）" % (sid, len(vfx)))
+        for v in vfx:
+            body = v[len("[VFX]"):]
+            name = re.split(r"[｜|]", body)[0].strip()
+            miss = [k for k in VFX_KEYS if ("%s" % k) not in body]
+            if miss:
+                fails.append("%s 的 [VFX]「%s」缺 %s 段；应写 `名称｜形态｜光源｜起｜中｜收`（R59.3／R39）"
+                             % (sid, name[:18], "／".join(miss)))
+            parts = [p.strip() for p in re.split(r"[｜|]", body)][1:]
+            labels = [p.split("：")[0].strip() for p in parts if p]
+            if labels[:5] and labels[:5] != list(VFX_KEYS):
+                warns.append("%s 的 [VFX]「%s」五段顺序是 %s，应为 形态→光源→起→中→收（R59.3）"
+                             % (sid, name[:18], "→".join(labels[:5])))
+            for w in VFX_BANNED:
+                if w in v:
+                    fails.append("%s 的 [VFX] 出现禁用词「%s」；必须写成可拍的材质、颜色、结构与体积（R39.5／R59.3）"
+                                 % (sid, w))
+        if len(sfx) < len(vfx):
+            fails.append("%s 有 %d 条 [VFX] 但只有 %d 条 [SFX]；一特效一行声音，写三层（低频底／瞬时声／余响），R59.7"
+                         % (sid, len(vfx), len(sfx)))
+        if not light:
+            warns.append("%s 有特效但没有 [LIGHT] 行；特效自发光就是主光，必须写照亮谁、投影朝哪（R40／R59.4）" % sid)
+
+    if total:
+        warns.append("特效场合计 [VFX] %d 条（R59）" % total)
+        # 分镜层：每场至少要把本场一个特效名落进这一场（场标题括号或提示词里）
+        board_scenes = split_blocks(board_txt, RE_BOARD_SCENE)
+        for sid, lines in scenes:
+            vfx = [l.strip()[5:].split("｜")[0].strip() for l in lines if l.strip().startswith("[VFX]")]
+            if not vfx:
+                continue
+            nm = [n for n in vfx if re.split(r"[｜|]", n)[0].strip()]
+            keys = [re.sub(r"^(?:道具|场景|人物)[一二三四五六七八九十]+", "", n).strip() for n in nm]
+            keys = [k for k in keys if k]
+            hit = None
+            for blk in board_scenes:
+                head = blk["m"].group(0)
+                if sid in head:
+                    hit = blk["body"] + head
+                    break
+            if hit is None:
+                warns.append("%s 有 [VFX] 但分镜.md 找不到这一场的场块；场标题必须带「来源：%s」（R59.5）" % (sid, sid))
+            elif keys and not any(k in hit for k in keys):
+                warns.append("%s 的特效名（%s）一个都没出现在分镜这一场；场标题括号里要先列本场特效清单，再落进四处（R59.5）"
+                             % (sid, "、".join(keys[:3])))
+        # 分段层：英文术语是否真落进去了
+        if not re.search(r"rune|arc|halo|pillar|formation|array|vortex|chain|lightning|flame|glow|ward",
+                         seg_txt, re.I):
+            warns.append("分段视频提示词.md 里没有任何特效英文词（rune／arc／halo／pillar／formation…）；"
+                         "特效阶段要写进 detailed_description，术语见 `references/特效模板.md` 第三节（R59.6）")
+        for name, txt in (("剧本.md", script_txt), ("分镜.md", board_txt)):
+            if re.search(r"配乐\s*[:：]|背景音乐|BGM|b\s?g\s?m", txt):
+                fails.append("%s 写了配乐／BGM；特效声只写画内 `[SFX]`／`overall_soundscape`（R25／R59.7）" % name)
+    return total
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--project", required=True)
@@ -1238,6 +1325,9 @@ def main():
     # ---------- 转场（R57） ----------
     allow_trans = args.allow_transition or ("用户指定转场" in script_txt) or ("转场（用户指定" in board_txt) or ("转场（用户指定" in seg_txt)
     check_transitions(shot_pr_pairs, seg_detail_pairs, allow_trans, fails, warns)
+
+    # ---------- 特效（R59） ----------
+    notes["vfx"] = check_vfx(script_txt, board_txt, seg_txt, fails, warns)
 
     # ---------- 跨文件 ----------
     board_total = sum(v for v in shot_durs.values() if v)
