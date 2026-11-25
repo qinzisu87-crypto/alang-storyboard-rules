@@ -86,7 +86,7 @@ GAZE_RE = re.compile(
     r"|看向观众|望向观众|直视观众|对着观众"
     r"|第一人称主观|主观视角|视线[^，。；\n]{0,6}镜头)"
 )
-DIALOGUE_LINE = re.compile(r"^\s*(?!约束|起幅|切\s*[：:]|转场|镜头|画面)[^\s：:（]{1,8}(?:（[^）]*）)?[：:]")
+DIALOGUE_LINE = re.compile(r"^\s*(?!约束|起幅|切\s*[：:]|转场|镜头|画面|台词原文)[^\s：:（]{1,8}(?:（[^）]*）)?[：:]")
 BODY_RE = re.compile(r"(眉|眼|嘴|唇|下颌|下巴|喉|呼吸|手|指|肩|背|腰|膝|脚|腿|臂|腕|掌|视线|目光|重心|肌肉|咬肌|瞳孔|眼睑)")
 BODY_RE_EN = re.compile(r"(eye|eyes|eyelid|pupil|gaze|brow|jaw|lip|lips|mouth|throat|breath|shoulder|hand|finger|wrist|palm|weight|neck|tendon|chin|face|spine|knee|foot)", re.I)
 CJK = re.compile(r"[\u4e00-\u9fa5]")
@@ -459,7 +459,12 @@ def field_lines(body):
             if b.start() > h.end():
                 end = min(end, b.start())
                 break
-        d.setdefault(h.group(1), body[h.end():end])
+        # 分镜九栏：下一个同层级「- 字段：」行即截断，子行（台词原文）随主栏保留
+        tail = body[h.end():end]
+        next_sub = re.search(r"^[*-]\s*", tail, re.M)
+        if next_sub:
+            tail = tail[:next_sub.start()]
+        d.setdefault(h.group(1), tail)
     return d
 
 
@@ -605,66 +610,55 @@ def check_standing(blocks, source, defined, fails, warns, anchors):
 
 RE_CHAR_BLOCK = re.compile(r"^##\s+(C\d{2})\s*(?:｜|\|)?\s*(.+)$", re.M)
 RE_CHAR_CHOICE = re.compile(r"本集选择[：:]\s*(\S+)", re.M)
-A_ITEMS = ["三视图", "面部特征", "服装结构", "发型与配饰", "身体比例"]
+A_ITEMS = ["面部特写", "正面", "侧面", "背面"]
+LEGACY_A_NAMES = ("三视图", "面部特征", "服装结构", "发型与配饰", "身体比例")
 
 
 def check_char_assets(txt, fails, warns):
-    """R28：首行选择与 A／B 节是否对得上、A 五项是否齐、A 内每条是否带图槽。"""
-    m = RE_CHAR_CHOICE.search(txt)
-    if not m:
-        fails.append("人物资产.md 缺首行「本集选择：A／B／AB」（R28）")
-        choice = ""
-    else:
-        choice = m.group(1).strip().upper()
-        if choice not in ("A", "B", "AB"):
-            fails.append("人物资产.md 的「本集选择」只能是 A／B／AB，当前是「%s」" % m.group(1).strip())
-
+    """R28：人物资产只有四项（面部特写／正面／侧面／背面），不分 A／B 层、不写本集选择；
+    每条须是可粘提示词并带图槽；旧式 A／B 分层与 A1–A5 只提醒不判失败（不回溯）。"""
     blocks = list(RE_CHAR_BLOCK.finditer(txt))
     if not blocks:
         fails.append("人物资产.md 没有角色段（应为「## C01 周野」）（R28）")
         return set()
 
-    ids = set()
+    ids = {b.group(1) for b in blocks}
+    if RE_CHAR_CHOICE.search(txt) or "### A 资产" in txt or "### B 资产" in txt:
+        warns.append("人物资产.md 仍是旧式 A／B 分层（`本集选择` 或 `### A 资产`／`### B 资产`）；"
+                     "新口径只出四项提示词（面部特写／正面／侧面／背面），不分层、不写选择行。"
+                     "旧资产按不回溯保留，下次重出该角色时改四项（R28）")
+        return ids
+
     for i, b in enumerate(blocks):
-        cid, name = b.group(1), b.group(2).strip()
-        ids.add(cid)
+        cid = b.group(1)
         end = blocks[i + 1].start() if i + 1 < len(blocks) else len(txt)
         body = txt[b.end():end]
-        has_a = "### A 资产" in body
-        has_b = "### B 资产" in body
-        if choice in ("A", "AB") and not has_a:
-            fails.append("%s 缺「### A 资产」（本集选择是 %s）" % (cid, choice))
-        if choice in ("B", "AB") and not has_b:
-            fails.append("%s 缺「### B 资产」（本集选择是 %s）" % (cid, choice))
-        if choice == "A" and has_b:
-            fails.append("%s 写了 B 资产，但本集只选了 A（不许擅自补齐）" % cid)
-        if choice == "B" and has_a:
-            fails.append("%s 写了 A 资产，但本集只选了 B" % cid)
-        if has_a:
-            a_body = body.split("### A 资产", 1)[1]
-            a_body = a_body.split("### B 资产", 1)[0]
-            heads = re.findall(r"^####\s*A(\d)\s*(.*)$", a_body, re.M)
-            digits = {h[0] for h in heads}
-            if len(heads) < 5 or digits != set("12345"):
-                fails.append("%s 的 A 资产小节应为 A1–A5 五项，当前是 %s（R28）"
-                             % (cid, "、".join(sorted(digits)) or "无"))
-            for kw in A_ITEMS:
-                if kw not in a_body:
-                    fails.append("%s 的 A 资产缺「%s」" % (cid, kw))
-            lines = [l for l in a_body.splitlines() if l.strip().startswith("- ")]
-            if not lines:
-                fails.append("%s 的 A 资产没有任何条目" % cid)
-            for l in lines:
-                if "提示词" not in l:
-                    fails.append("%s 的 A 资产有条目没写成提示词（应以「提示词：」开头，能直接粘去出图）：%s"
-                                 % (cid, l.strip()[:36]))
-                    break
-            for l in lines:
-                if not SLOT.search(l):
-                    fails.append("%s 的 A 资产有条目没写「图槽：@图片 N」：%s" % (cid, l.strip()[:36]))
-                    break
-    if choice == "AB":
-        warns.append("本集选了 AB，B 的发色／肤色／服装主色须与 A 一致（脚本查不了，见人工核对第 15 条）")
+        heads = re.findall(r"^####\s*A(\d)\s*(.*)$", body, re.M)
+        digits = {h[0] for h in heads}
+        head_names = " ".join(h[1] for h in heads)
+        if digits == set("12345") or any(k in head_names for k in LEGACY_A_NAMES):
+            warns.append("%s 是旧式五项资产（%s）；新口径为 A1 面部特写、A2 正面、A3 侧面、A4 背面，四个图槽。"
+                         "旧资产按不回溯保留，下次重出该角色时改四项（R28）"
+                         % (cid, "、".join(sorted(digits))))
+            continue
+        if len(heads) < 4 or digits != set("1234"):
+            fails.append("%s 的小节应为 A1–A4 四项（面部特写／正面／侧面／背面），当前是 %s（R28）"
+                         % (cid, "、".join(sorted(digits)) or "无"))
+        for kw in A_ITEMS:
+            if kw not in body:
+                fails.append("%s 缺「%s」一节（R28）" % (cid, kw))
+        lines = [l for l in body.splitlines() if l.strip().startswith("- ") and "｜" in l]
+        if not lines:
+            fails.append("%s 没有任何条目" % cid)
+        for l in lines:
+            if "提示词" not in l:
+                fails.append("%s 有条目没写成提示词（应以「提示词：」开头，能直接粘去出图）：%s"
+                             % (cid, l.strip()[:36]))
+                break
+        for l in lines:
+            if not SLOT.search(l):
+                fails.append("%s 有条目没写「图槽：@图片 N」：%s" % (cid, l.strip()[:36]))
+                break
     return ids
 
 
@@ -1009,7 +1003,7 @@ def main():
         check_prompt_terms(char_txt, "人物资产.md", fails)
         notes["char_ids"] = len(cids)
         cm = RE_CHAR_CHOICE.search(char_txt)
-        notes["char_choice"] = cm.group(1).strip().upper() if cm else "?"
+        notes["char_choice"] = cm.group(1).strip().upper() if cm else "—"
 
     if scene_p.is_file():
         scene_txt = read_text(scene_p)
@@ -1031,6 +1025,7 @@ def main():
 
     board_prompt_all = []
     shot_durs = {}
+    stray = []
     for s in shots:
         sid = s["m"].group(1)
         where = "镜头 %s" % sid
@@ -1060,6 +1055,17 @@ def main():
             if not re.search(r"[①②③④⑤⑥⑦⑧⑨]", tl):
                 fails.append("%s「台词」栏缺说话顺序（格式 ① 周野 → ② 小赵）" % where)
         check_line_order(tl, where, "台词", fails)
+        # R14／R23：台词原文只写在「提示词」里；抄进「声音」「台词」栏就是复述，汇总告警
+        for _, dtxt in dialogue:
+            if len(dtxt) < 2:
+                continue
+            for col in ("台词", "声音"):
+                if dtxt in f.get(col, ""):
+                    stray.append("%s「%s」栏" % (where, col))
+                    break
+            else:
+                continue
+            break
         # 独白
         sound = f.get("声音", "")
         is_mono = any(w in sound for w in MONO_WORDS)
@@ -1074,6 +1080,10 @@ def main():
         act = f.get("动作", "")
         if "：" in act or ":" in act:
             fails.append("%s「动作」栏用了冒号，会被当成台词行；改用逗号" % where)
+
+    if stray:
+        warns.append("%d 处把台词原文抄进了「声音」／「台词」栏（台词原文只该写在「提示词」，R14 台词只说一遍）；例：%s"
+                     % (len(stray), "、".join(stray[:3])))
 
     if shot_durs and any(v is None for v in shot_durs.values()):
         fails.append("有镜头没在「拍摄手法」里写「镜长 N 秒」，时长合计不可信")
@@ -1125,9 +1135,14 @@ def main():
     if shots and segs and board_total != seg_total:
         fails.append("分镜合计 %d 秒 vs 分段合计 %d 秒，不相等" % (board_total, seg_total))
 
-    # R37：一集 4 分钟（240 秒，落 220–260 秒）
+    # R37：一集 4 分钟（240 秒，落 220–260 秒）；剧本头部「用户指定 N 秒」为用户改口径豁免
     if seg_durs:
-        if not (220 <= seg_total <= 260):
+        user_sec = re.search(r"用户指定\s*(\d+)\s*秒", script_txt)
+        if user_sec:
+            if seg_total != int(user_sec.group(1)):
+                fails.append("一集总时长 %d 秒，与剧本头部用户指定 %d 秒不一致（R37）"
+                             % (seg_total, int(user_sec.group(1))))
+        elif not (220 <= seg_total <= 260):
             fails.append("一集总时长 %d 秒，不在 4 分钟口径（220–260 秒，目标 240 秒）：少了补戏或并段，多了删并（R37）"
                          % seg_total)
 
@@ -1180,8 +1195,8 @@ HUMAN = [
     "轴线：同一场是否只在一侧工作，画左画右站位是否跨段不变",
     "每场「场景站位」的锚点是否都在本场景里真实存在且不动，各人位置对锚点说得通，剧本与分镜同锚点同编号（R26）",
     "剧本、分镜里的 @C／@S／@P 是否都能在资产提示词.md 找到，编号跨集不重排，三节提示词能直接粘去文生图（R27）",
-    "人物资产是否只出了用户点的那层（答 A 无 B 节、答 B 无 A 节），没替用户擅自补齐（R28）",
-    "A 资产五项是否齐、三视图之间身高比例服装配饰是否一致，B 的固定特征与 A 的取值是否打架（R28）",
+    "人物资产是否只写了四项（面部特写／正面／侧面／背面）、不分 A／B 层、不写本集选择行、没有擅自补人物档案（R28）",
+    "人物资产四项是否齐（面部特写／正面／侧面／背面）、有没有多余的 A／B 分层或本集选择行，四张之间同一张脸与身高比例服装配饰是否一致（R28）",
     "场景资产是否只出了用户点的那层，A2–A4 每条是否可粘提示词带图槽，A3 布局图里画不画得出锚点物，B6 空间规则与 R26 站位是否一致（R29）",
     "三类资产是否都只交了提示词与槽号，没有图片文件、路径或「已出图」说法，交付报告没把提示词说成图片已生成（R30）",
     "每段段数是否由镜长决定，不是硬凑",
@@ -1201,7 +1216,7 @@ def report(fails, warns, notes, info, _unused, segs):
         if info.get("assets"):
             print("资产编号已定义 %d 条（C／S／P）" % info["assets"])
         if info.get("char_ids"):
-            print("人物资产：选择=%s，角色=%s 个" % (info.get("char_choice"), info["char_ids"]))
+            print("人物资产：角色=%s 个（四项，不分层）" % info["char_ids"])
         if info.get("scene_ids"):
             print("场景资产：选择=%s，场景=%s 个" % (info.get("scene_choice"), info["scene_ids"]))
         if info.get("style"):
