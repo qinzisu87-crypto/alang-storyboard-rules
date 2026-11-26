@@ -10,21 +10,21 @@
 剧集/<EP>/剧本.md          ← 场次 + 场景站位 + 台词 + 声音设定
 剧集/<EP>/资产提示词.md     ← 人物 C / 场景 S / 道具 P 编号 + 可直接用的生图提示词
 剧集/<EP>/人物资产.md       ← 四项提示词：面部特写／正面／侧面／背面（不分层、不问层）
-剧集/<EP>/场景资产.md       ← 十章结构，01–04 归 A、05–10 归 B
+剧集/<EP>/分段视频提示词.md  ← 一镜一段（分镜几镜就几段，每段只一个 [Shot 1]），逐字照 references/分段模板.md（R56／R63）：`*` 元数据六行、六段字段缩进、参考供给句、outside window
 剧集/<EP>/分镜.md          ← 九栏，每镜一条中文连续动作提示词（不写时间码）
 剧集/<EP>/分段视频提示词.md  ← 相邻镜打包成 4–15 秒生成段，逐字照 references/分段模板.md（R56）：`*` 元数据六行、六段字段缩进、参考供给句、outside witness 开头、镜头块后置 `(Sx) 角色：[Chinese] 原文` 台词块
 ```
 
 ## 人物资产默认画风（REF-900）
-
+## 人物资产默认参考画风（REF-900，R64）
 人物画风只问一次。用户没有另给人物参考图或文字描述、答「默认／随便／你定／没有别的」，就直接用这套内置默认画风，不再追问；用户明确给了别的图或描述，以用户的为准。
 
 ![默认人物画风：冰蓝仙侠·三维写实](references/画风预览/默认人物画风.jpg)
 
-- **画风名**：`REF-900` 冰蓝仙侠·三维写实
-- **中文锁**：`电影级三维写实国风仙侠，半写实瓷白肌肤与细腻东亚五官，半透明多层真丝汉服，月白／冰蓝主色（深青与银灰点缀），柔和的正面棚拍光，纯白无缝背景，全身站姿，高精度布料褶皱与银饰，浅景深，无赛璐璐勾线。`
+- **中文质感词**：`电影级三维写实国风仙侠，半写实瓷白肌肤与细腻东亚五官，半透明多层真丝汉服，月白／冰蓝主色（深青与银灰点缀），柔和的正面棚拍光，纯白无缝背景，全身站姿，高精度布料褶皱与银饰，浅景深，无赛璐璐勾线。`
+- **英文质感词**：`cinematic 3D realistic Chinese xianxia character render, semi-realistic porcelain skin and delicate East Asian features, translucent layered silk hanfu, moon-white / ice-blue palette (deep teal and silver-grey accents), soft frontal studio light, pure white seamless background, full-body standing pose, high-precision fabric folds and silver ornaments, shallow depth of field, no cel shading.`
 - **英文锁**：`cinematic 3D realistic Chinese xianxia character render, semi-realistic porcelain skin and delicate East Asian features, translucent layered silk hanfu, moon-white and ice-blue palette with deep teal and silver accents, soft neutral studio key light, seamless white background, full-body standing pose, high-detail fabric folds and silver ornaments, shallow depth of field, no cel shading, no anime outline.`
-- **锁什么**：只锁渲染质感、配色体系、材质精度、打光方式与白底全身构图；人物发型、服装款式、身份特征按角色资产替换，不照搬参考图里的这个女性角色。
+- **取什么（R64：不再是「锁」）**：只借渲染质感、配色体系、材质精度、打光方式；人脸长相、身材、服装款式、姿态构图、场景地点、道具种类一律按剧情写；参考图与剧情冲突时以剧情为准。
 - **场景与道具**：另有一套默认 `REF-902`，没有另给就自动使用；详见下一节。
 
 ## 场景与道具默认画风（REF-902）
@@ -34,12 +34,11 @@
 ![默认场景画风：雨雾仙侠·近景](references/画风预览/默认场景画风-近景.jpg)
 
 ![默认场景画风：雨雾仙侠·大景](references/画风预览/默认场景画风-大景.jpg)
-
+## 场景与道具默认参考画风（REF-902，R64）
 - **画风名**：`REF-902` 雨雾仙侠·实景质感
-- **中文锁**：`电影级写实国风仙侠场景，低饱和青灰蓝主调、暖琥珀灯火点缀，柔散天光与体积雾，真实物理材质，青石／旧木／夯土／青苔的湿润粗糙质感，空气透视与浅景深，道具为粗陶／竹木／旧铁／湿布／纸灯笼并带使用磨损，无赛璐璐勾线。`
-- **英文锁**：`cinematic realistic Chinese xianxia environment, low-saturation blue-grey palette with warm amber lantern accents, soft overcast light and volumetric mist, physically based materials, damp rough textures of stone, aged wood, rammed earth and moss, atmospheric perspective and shallow depth of field; props of coarse ceramics, bamboo, aged iron, damp cloth and paper lanterns with visible wear, no cel shading, no anime outline.`
-- **锁什么**：只锁场景的渲染质感、配色、材质、雾光与景深，以及道具的材质、磨损与色彩；不锁具体是村落还是山河、不锁建筑布局、不锁道具种类。
-- **什么时候用**：场景 A2–A4 与全部道具条目默认挂 `REF-902`；第二问答「沿用人物那张」则改用 `REF-900`，另给图／文字则用 `REF-002`。
+- **中文质感词**：`电影级写实国风仙侠场景，低饱和青灰蓝主调、暖琥珀灯火点缀，柔散天光与体积雾，真实物理材质，青石／旧木／夯土／青苔的湿润粗糙质感，空气透视与浅景深，道具为粗陶／竹木／旧铁／湿布／纸面。`
+- **英文质感词**：`cinematic realistic Chinese xianxia environment, low-saturation blue-grey palette with warm amber lantern accents, soft diffuse daylight with volumetric fog, physically based materials, bluestone and weathered timber, deep focus landscape.`
+- **取什么（R64）**：只借场景的渲染质感、配色、材质、雾光与景深，以及道具的材质、磨损与色彩；不锁具体是村落还是山河、不锁具体道具种类——这些都按剧情写。
 
 ## 它和我改了什么
 
@@ -70,6 +69,7 @@
 - **段与段之间要么无缝、要么写明看得见的转场（R60，1.47 起）**：分段视频提示词送 H3 一段就生成一段，导出后要剪成一条片，所以每一对相邻段只有两种合法接法。**A 无缝接**用在本就同一场、机位方向没变、前段末帧与后段首帧是同一动作的连续相位时——两段都写 `hand-off seamless`：前段 `Exit:` 末句写 `hand-off seamless — no transition frame, <后段接手的连续动作>`，后段 `Entry:` 写 `continuing from the previous segment in the same camera setup — …; hand-off seamless, no transition frame;`，剪在一起看不出接缝，不加任何转场画面。**B 显式转场**用在换场、时间跳跃、必须换轴线、两段状态接不上时——前段 `Exit:` 之后、台词块之前加一行 `Transition out: <方式> — <看得见的转场动作>`，后段 `Entry:` 之后加一行 `Transition in: <同一方式> — <从什么画面进来>`；方式仍用 R57 六种（`cross-scene hard cut`／`occlusion wipe`／`match cut`／`light wash`…），两行必须同名，目标／来源场景写在破折号之后。位置只许这两处，不许写进段中间、不许进台词块、不另立字段；只写 `cuts to`／`hard cut` 了事不算写了转场。剪辑点不许切在说话中途、表情变化中途、半个动作上；同场优先走 A，一集 B 不超过段间数量一半，同种 B 连用不超过 3 次。`check_rule.py` 的 `check_seam` 逐对比对：两段都有 `seamless` 判 A 过；`Transition out:`／`Transition in:` 齐全且方式同名才判 B 过；只写一半、方式不一致、B 只有方式没有转场句即 FAIL；整份没有任何 R60 标记的旧稿只 WARN，另输出「6 对相邻段，A 无缝接 3 处、B 显式转场 3 处」汇总。
 - **分段视频提示词一镜一段：分镜几镜就写几段，不许把镜头组合进一段（R63，1.50 起）**：`分镜.md` 的第 N 镜就是 `分段视频提示词.md` 的第 N 段，**段数＝镜数**，段标题的镜名与分镜同一镜同名。每段 `detailed_description` 只放一个 `[Shot 1]`，**不许出现 `[Shot 2]`／`[Shot 3]`、不许写 `At MM:SS.mmm` 段内切点、不许用 `cuts to` 在段内换机位**——想切镜就在分镜里另加一镜，分段跟着多一段。段「时长」逐字等于该镜「镜长」，所以镜长与段长统一 **4–15 秒整数**（H3 单次生成下限 4 秒）。**不足 4 秒的短镜（打斗 1–2 秒、反应与插入特写 2–3 秒、形变分解 1 秒）在分镜阶段就并进相邻镜**，把两三拍的连续动作合成一个 4–6 秒镜，镜内按「第一拍 → 第二拍」写，动作一句不丢、只是少一个镜号；超过 15 秒的长镜在分镜层拆成两镜各 7–8 秒、各成一段。并镜后相邻段仍按 R60 走 A 无缝或 B 显式转场，字数密度不因变短而缩水（150–350 英文词）。`check_rule.py` 的 `check_one_shot` 查：段内多于一个 `[Shot]`、段数与镜数不等、段时长≠镜长为 FAIL（旧格式仍带 `At MM:SS.mmm` 的打包稿按不回溯只提示），并输出「R63 分段＝镜数 N／段数 M」。
 - **有对话与人物表情的场面照表情台词模板写（R62，1.49 起）**：一场里两人以上来回说话，或有人物面部要演情绪（对话、对质、独白、哭诉、劝说、审问、告别、群体议论），三层一律照 `references/表情台词模板.md` 写。剧本先在场头写 `**说话顺序**：① 人物三 → ② 人物五 → ③ 人物三`（全片连续编号，独白标 `（VO 不张嘴）`），台词**一句一行只写 `说话人：原文`**——不带 `[Chinese]`、不加「（冷笑）」这类括注、不写「他说」、听不清照标「（听不清）」；每 1–4 句之间插一句身体准备（抬眼／吸气／攥拳／松肩，先准备后开口）；**表情两层**：定调（情绪＋几成＋对着谁）＋清单（眉／眼睑／瞳孔／鼻翼／咬肌／牙关／唇角／下颌／喉结／筋线／指节／上身前倾／重心），只有形容词或只有肌肉都不合格；剧本末尾补两份总表 `## 声音设定`（一人一行：音色／语速／音量／句尾／特殊情况）与 `## 表演总则`（情绪先定调、独白不张嘴、一句一人、全片不配乐）。分镜「台词」栏只写 `① 名 → ② 名`（同一人连说重复写、无人说话写「无」），**一个字原文都不进分镜**；「表情」栏五段齐、末句固定不看镜头；「声音」栏写嗓音质感（粗粝／清亮／含混）＋语速音量＋背景层；正反打写 `转场出：硬切（正反打）`，说话镜 4–6 秒、听者反应镜 4–5 秒（不足 4 秒并镜）、连切不过 3 次。分段「表演参考」写 `综NN 情绪名（2–3 个可执行动作）`（编号取 `references/表演参考/微表情.md`）、「说话人」写 `① (S1) 名 → ② (S2) 名`，`detailed_description` 头句固定 `Only the character who is speaking moves their lips; the rest keep lips closed.`，每 Shot 英文表情三句带几成（`three parts scrutiny`），说话镜写 `lips opening on the first word`、听者镜写 `lips closed, only eyes and jaw react`、独白镜写 `lips pressed together, breath through the nose`，术语照 32 条固定表；台词块 `(Sx) 角色：[Chinese] 原文` 放在 `Exit` 之后、`overall_soundscape` 之前，段内连续递增、一句一行；`overall_soundscape` 写嗓音质感与情绪尾音，不抄台词。九栏与六段不动，不新加栏目；同场带特效叠 R59、带打斗叠 R61（台词只落回合间隙），`[VFX]`／`[FIGHT]`／话轮三套并存。`check_rule.py` 的 `check_dialogue_perf` 查台词带 `[Chinese]`、分镜台词栏抄原文、分段说话人格式与台词块不符（FAIL），缺「声音设定／表演总则」、表情缺「几成」、缺口型句只提醒。
+- **三类资产取消画风锁，改成参考画风（R64，1.51 起）**：`人物资产.md`／`场景资产.md`／`资产提示词.md` 的头两行从「画风：REF-… 画风锁」改成 `参考画风：REF-900 冰蓝仙侠·三维写实（参考，不照搬）`＋`本剧形象：…`；每条提示词先写这个人在剧情里的样子（身份年龄／体型姿态／服装款式与磨损与伤势／发式与固定特征，场景写建筑与年代痕迹、天气与使用痕迹，道具写形状尺寸材质磨损），再写一两句质感词，尾巴写 `参考画风 REF-…（取其××，形象按本剧）`。只借渲染质感／配色倾向／材质语言／打光方式，人脸长相、身材、服装款式、姿态构图、建筑布局、场景地点、道具种类一律按剧情写；参考图与剧情冲突以剧情为准；换参考图只换编号与质感词、本剧形象一字不改；一套形象、两套参考（人物 `REF-900`、场景道具 `REF-902`）。
 - **有打斗的场面照打斗模板写，带光效就叠特效模板（R61，1.48 起）**：兵器对打、徒手格斗、群战围攻、追击截击、受击与击飞、一击定胜负、起势对峙任一类出现，三层一律照 `references/打斗模板.md` 写。剧本层先写 `**打斗回合**（本场 N 回合）`，一回合一行 `- 回合 N：谁先动｜接触点：…｜结果：…`；正文一回合一段四句式——起势（谁先动、蹬地、重心压哪条腿）→ 接触（兵器／身体在哪一高度哪一角度接上、谁压谁）→ 受力结果（谁被推成什么姿态、碎什么飞什么）→ 姿态（回合结束时两人各停在哪）；`[SFX]` 一回合一行写三层声（低频底／瞬时声／空间余响）。分镜层一镜一回合、打斗镜 4–6 秒（R63 下限 4 秒，原来的 1–2 秒快切镜在分镜层并进相邻镜）、镜序起势镜→接触镜→受力镜、一场 ≥4 镜、「动作先后」≥3 拍，**每击必落可见结果**（后仰／下沉／退步／裂石／碎甲／弹开／火星／击飞），不许「两人激烈交锋」「一顿猛攻」「不分胜负」一句带过。分段层**一段一镜**（1.50 起，R63）、段内装 1–2 回合，每句至少一个受力结果英文词（`blades lock`／`shockwave`／`dust wave`／`stone cracks`／`stagger`／`bracing back`／`thrown back`），并把机位与速度写进句（`handheld violently shaking on impact`／`camera panning with the spin`），术语全片一致（`upward cut`／`downward chop`／`ground-skimming arc`／`airborne spin slash`）。攻守要交替：不许连续三回合同一人进攻、被压一方每回合有反制、每场至少一次局面变化。**带刀气／剑气／刃光／光团／核心／法阵的打斗与 R59 特效模板叠用**，`打斗回合`／`[FIGHT]` 与 `[VFX]` 并存，特效作用在接触点上。打斗镜照 R57 写 `承接：`／`转场出：`，相邻段照 R60 二选一；九栏与六段不动，不新加栏目。`check_rule.py` 的 `check_fight` 查回合三段缺段、写打斗却没有分层 `[SFX]`、空词，拍数不足与分段缺打斗英文词只提醒。
 - **道具资产也分 A／B，用户自选（R41）**：A＝整体主视觉＋正侧背三视图＋状态变化（1、2、6 项），B＝局部细节＋颜色与材质＋使用与人物交互（3、4、5 项）；出之前先问「A／B／AB」，答 A 只写 A1–A3、答 B 只写 B1–B3；轮廓、结构比例、标志性细节优先于装饰，三视图同源、尺寸写数值。
 - **光影只照原文（R40）**：原文写了光位、明暗、影子、逆光、窗光、月光、烛火、灯光、火光、闪电、屏幕光、色温、光变，剧本就要单独一行 `[LIGHT] 光源｜方向｜强度／色温｜落点｜变化`，分镜写进「自然规律」「提示词」，分段提示词的「场景与轴线」「提示词」也要按动作顺序写（起幅先写光位、跨段不许换光），光变写清起收阶段；原文没写就不补光，不遮脸遮嘴、不改站位。
@@ -94,9 +94,9 @@
 
 ```
 阿良的分镜制作规则/
-├── SKILL.md                     # 总控：R1–R63 + 流程 + 21 题材速查
+├── SKILL.md                     # 总控：R1–R64 + 流程 + 21 题材速查
 ├── references/
-│   ├── 制作规则原文.md           # 主规则原文（63 条，R1–R63）
+│   ├── 制作规则原文.md           # 主规则原文（64 条，R1–R64）
 │   ├── 分段模板.md               # R56 分段唯一格式准绳（用户 EP001 样本全文）
 │   ├── Ref2VA官方规范.md         # 官方 MiniMax-H3 Ref2VA 六段式硬规范与本项目映射
 │   ├── 视线与朝向控制规范.md     # R54 参考图只继承身份、不继承正脸与视线
@@ -106,10 +106,10 @@
 │   ├── 打斗模板.md               # R61 打斗三层写法（打斗回合／一镜一回合／受力结果英文词；带光效叠 R59）
 │   ├── 表情台词模板.md           # R62 对话与表情三层写法（说话顺序／台词栏／表情五段／口型句；32 条术语表）
 │   ├── H3基础约束.md             # 基础层：H3 技术边界与六段转写
-│   ├── 人物资产规范.md           # 人物四项提示词条目清单（5 章：四项／一致性锁／投喂图／验收）
+│   ├── 人物资产规范.md           # 人物四项提示词条目清单（5 章：四项／同一形象同一参考号／投喂图／验收）
 │   ├── 场景资产规范.md           # 场景十章目录（01–04 A、05–10 B）
 │   ├── 道具资产规范.md           # 道具六项清单（1、2、6 A；3、4、5 B）＋骨架（R41）
-│   ├── 画风规范.md               # 画风要图、写锁、校验（R31 参考图版）
+│   ├── 画风规范.md               # 参考画风：要图、写质感词与尾巴、校验（R31／R64）
 │   ├── 题材规范.md               # 四大类 × 21 题材：节奏／对白字数／台词口径／尺度（R38）
 │   ├── 模板.md                   # 六份文件的骨架，照着填
 │   └── 表演参考/                 # R48／R49 参考库
@@ -143,7 +143,7 @@ python scripts/check_rule.py --project <项目目录> --ep EP001
 
 ## 题材：四大类、21 个
 
-小说一到手，先在这 21 个题材里选一个（R38）；只加不改，R1–R54 一条没动，R55 只增提示词方法论、R57 只增转场标记、R58 只增反推入口、R59 只增特效写法、R60 只增段间衔接、R61 只增打斗写法、R62 只增对话与表情写法，都不改变结构约束。
+小说一到手，先在这 21 个题材里选一个（R38）；只加不改，R1–R54 一条没动，R55 只增提示词方法论、R57 只增转场标记、R58 只增反推入口、R59 只增特效写法、R60 只增段间衔接、R61 只增打斗写法、R62 只增表情台词写法、R63 只增一镜一段、R64 把画风锁改成参考画风、R62 只增对话与表情写法，都不改变结构约束。
 
 **光影（R40）**：只用原文里有的光影。原文出现光位／明暗／影子／逆光／窗光／月光／烛火／灯光／火光／闪电／屏幕光／色温／光变，剧本另起 `[LIGHT] 光源｜方向｜强度／色温｜落点｜变化` 一行，分镜写进「自然规律」与「提示词」，**分段提示词也写**（「场景与轴线」写本节光位与承接、「提示词」按动作顺序写光、起幅先写光位），动作里写人穿过光区的明暗变化；原文没写的场不补光，不加夕阳、霓虹、氛围光，也不许用光影遮脸遮嘴。
 
@@ -176,6 +176,8 @@ python scripts/check_rule.py --project <项目目录> --ep EP001
 - 基础层来自开源的短剧分镜技能（`duanju-storyboard-to-h3` 及其依赖的 `short-drama-storyboard`／`short-drama-video-prompts`／`minimax-h3` 规范），本仓库在其之上按实际使用情况做了调整，冲突处以本仓库主规则为准。
 - 人物默认画风 `REF-900`、场景道具默认画风 `REF-902` 为本仓库内置参考图；此前版本内置的 41 条画风曾取材自 [`yang0/handraw-style`](https://github.com/yang0/handraw-style)，该库与预览图已在本版移除。
 - 本仓库代码与文档采用 MIT 许可，第三方素材请遵循其各自许可。
+
+
 
 
 

@@ -792,9 +792,12 @@ def check_scene_assets(txt, fails, warns):
 
 
 
-STYLE_DECL = re.compile(r"画风[：:]\s*(REF-\d{3})")
-STYLE_TAIL = re.compile(r"画风\s*按\s*(REF-\d{3})\s*[：:]")
+STYLE_DECL = re.compile(r"参考画风[：:]\s*(REF-\d{3})")
+STYLE_DECL_OLD = re.compile(r"画风[：:]\s*(REF-\d{3})")
+STYLE_TAIL = re.compile(r"参考画风\s*(?:按)?\s*(REF-\d{3})")
+STYLE_TAIL_OLD = re.compile(r"画风\s*按\s*(REF-\d{3})\s*[：:]")
 STYLE_ANY = re.compile(r"(REF-\d{3})")
+STYLE_STORY = re.compile(r"本剧|剧情|形象|人设")
 
 
 def check_line_order(field, where, label, fails):
@@ -807,28 +810,43 @@ def check_line_order(field, where, label, fails):
         fails.append("%s「%s」说话顺序颠倒：%s（R34）" % (where, label, text.strip()[:30]))
 
 
-def check_style(texts, fails):
-    """R31＋R47：人物画风只问一次，未另行指定用默认 REF-900；场景道具也只问一次，未另行指定用默认 REF-902。
-    允许一集两句锁：人物一句（REF-900 默认／REF-001 用户图／REF-000 文字），
-    场景与道具一句（REF-902 默认／REF-002 用户给，可沿用人物号）。
+def check_style(texts, fails, warns):
+    """R64（2026-11-26 起）：画风由「锁」改成「参考」——参考图只给质感／配色／材质／打光，
+    形象一律按剧情写，不符就以剧情为准。
+    允许一集两套参考：人物一套（REF-900 默认／REF-001 用户图／REF-000 文字），
+    场景与道具一套（REF-902 默认／REF-002 用户给，可沿用人物号）。
     人物资产.md 用人物号；场景资产.md 用场景道具号；资产提示词.md 按小节分别对号；
-    每条带「提示词」的条目都要有 `画风 按 REF-xxx：` 尾巴，且必须与所在层对号。"""
+    每条带「提示词」的条目都要写 `参考画风 REF-xxx`（可后跟一句取舍说明），编号与本层对号，
+    并且提示词里要写到本剧形象；旧的 `画风：REF-…` / `画风 按 REF-…：` 按不回溯只提醒。"""
     def codes_of(txt):
         return sorted(set(STYLE_DECL.findall(txt)))
 
-    decls = {}
+    decls, legacy = {}, {}
     for name, txt in texts.items():
         cs = codes_of(txt)
         if cs:
             decls[name] = cs
+            continue
+        olds = sorted(set(STYLE_DECL_OLD.findall(txt)))
+        if olds:
+            legacy[name] = olds
+    if legacy and not decls:
+        warns.append("画风声明还是旧口径「%s」（R64 起改「参考画风：REF-…（参考，不照搬）」＋第二行「本剧形象：…」；旧稿不回溯）"
+                     % "、".join("%s 写「画风：%s」" % (n, "、".join(c)) for n, c in legacy.items()))
+        decls = legacy
     if not decls:
-        fails.append("三份资产文件都没有画风声明：人物应先落「REF-900 内置默认人物画风」或「REF-001 用户参考图」，场景道具应落「REF-902 内置默认场景道具画风」或「REF-002 用户参考图」（R31／R47）")
+        fails.append("三份资产文件都没有画风声明：人物写「参考画风：REF-900 冰蓝仙侠·三维写实（参考，不照搬）」，场景道具写「参考画风：REF-902 雨雾仙侠·实景质感（参考，不照搬）」，再各写一行「本剧形象：…」（R31／R64）")
         return ""
 
     all_codes = sorted({c for cs in decls.values() for c in cs})
     if len(all_codes) > 2:
-        fails.append("画风声明超过两句锁：%s（一集最多「人物一句＋场景道具一句」，R47）"
+        fails.append("参考画风超过两套：%s（一集最多「人物一套＋场景道具一套」，R64）"
                      % "、".join(all_codes))
+
+    # 新口径要求两行头：参考画风＋本剧形象
+    for name, txt in texts.items():
+        if name in decls and name not in legacy and not re.search(r"^.*本剧形象[：:]", txt, re.M):
+            fails.append("%s 缺「本剧形象：…」一行：参考画风只给质感，形象必须按剧情写（R64）" % name)
 
     # 人物号：REF-900 是内置默认人物锁，出现时优先；否则取第一个不是 REF-902 的编号。
     # 场景道具号：REF-902 是内置默认场景道具锁，出现时优先；否则取不同于人物号的编号。
@@ -843,12 +861,13 @@ def check_style(texts, fails):
 
     for name, cs in decls.items():
         if len(cs) > 1 and name != "资产提示词.md":
-            fails.append("%s 声明了多个画风编号：%s（人物资产只写人物锁，场景资产只写场景道具锁，R47）"
+            fails.append("%s 声明了多个参考画风编号：%s（人物资产只写人物那套，场景资产只写场景道具那套，R64）"
                          % (name, "、".join(cs)))
 
+    legacy_tails = []
     for name, txt in texts.items():
         if name not in decls:
-            fails.append("%s 缺「画风：REF-…」声明（R31）" % name)
+            fails.append("%s 缺「参考画风：REF-…」声明（R31／R64）" % name)
             continue
         if name == "人物资产.md":
             expect = char_code
@@ -859,7 +878,7 @@ def check_style(texts, fails):
             expect = None
 
         section = "人物"
-        bad = []
+        bad, old_tail, no_story = [], 0, []
         for line in txt.splitlines():
             st = line.strip()
             hm = re.match(r"^#{1,3}\s*([人物场景道具]+)", st)
@@ -873,15 +892,30 @@ def check_style(texts, fails):
                 want = scene_code if section in ("场景", "道具") else char_code
             tails = STYLE_TAIL.findall(st)
             if not tails:
-                bad.append((st[:26], "缺尾巴", want))
+                if STYLE_TAIL_OLD.findall(st):
+                    old_tail += 1
+                else:
+                    bad.append((st[:26], "缺「参考画风 REF-…」", want))
                 continue
             if any(c != want for c in tails):
                 bad.append((st[:26], "用错号 " + "、".join(tails), want))
+            if not STYLE_STORY.search(st):
+                no_story.append(st[:26])
+        if old_tail:
+            legacy_tails.append("%s %d 条" % (name, old_tail))
         if bad:
             sample = "；".join("%s（%s，应为 %s）" % (a, b, c) for a, b, c in bad[:3])
-            fails.append("%s 有 %d 条提示词画风对不上：%s（R47）" % (name, len(bad), sample))
+            fails.append("%s 有 %d 条提示词参考画风对不上：%s（R64）" % (name, len(bad), sample))
+        if no_story:
+            warns.append("%s 有 %d 条提示词没写到本剧形象（%s）：参考画风只作质感参考，形象要按剧情写，不符就以剧情为准（R64）"
+                         % (name, len(no_story), "、".join(no_story[:3])))
 
-    return char_code if len(all_codes) == 1 else "%s／%s" % (char_code, scene_code)
+    if legacy_tails:
+        warns.append("提示词尾巴还是旧口径「画风 按 REF-…：」（%s）：R64 起改「参考画风 REF-xxx（取其质感，形象按本剧）」，旧稿不回溯"
+                     % "、".join(legacy_tails))
+
+    return "%s／%s（参考，不照搬）" % (char_code, scene_code) if len(all_codes) > 1 \
+        else "%s（参考，不照搬）" % char_code
 
 
 def check_coverage(script_txt, board_txt, seg_txt, asset_txt, defined, fails, warns):
@@ -1492,13 +1526,13 @@ def main():
         sm2 = RE_CHAR_CHOICE.search(scene_txt)
         notes["scene_choice"] = sm2.group(1).strip().upper() if sm2 else "?"
 
-    # ---------- 画风（R31） ----------
+    # ---------- 画风（R31／R64 参考画风） ----------
     texts = {"资产提示词.md": asset_txt}
     if char_p.is_file():
         texts["人物资产.md"] = read_text(char_p)
     if scene_p.is_file():
         texts["场景资产.md"] = read_text(scene_p)
-    style = "" if args.reverse else check_style(texts, fails)
+    style = "" if args.reverse else check_style(texts, fails, warns)
     if style:
         notes["style"] = style
 
@@ -1705,6 +1739,7 @@ HUMAN = [
     "转场（R57）：每镜「转场出」的末帧状态与下一镜「承接」的五项（动作／朝向／重心／手持物／光位）是否真对得上；前段 Exit 与后段 Entry 的方式与末帧是否同一套说法；是否出现黑场／闪白／叠化／淡入淡出，或转场遮脸遮嘴、拦腰打断正在说的台词",
     "打斗（R61）：该场「打斗回合」每回合三段（谁先动／接触点／结果）是否都写得出；正文四句式是否落地、身体是否写到关节肌肉承重；有没有连续三回合同一人进攻、有没有一处局面变化；分镜是不是一镜一回合、起势→接触→受力顺序不乱、每击是否都落了可见结果（R61）",
     "对话与表情（R62）：台词是不是一句一人、每 1–4 句之间有一句身体准备；表情两层（情绪＋几成＋对着谁／眉·眼·鼻·嘴·颈·手）是否齐；正反打有没有连切超过 3 次、听者反应镜有没有抢戏；说话人与听者的口型是否分开写、独白镜是否唇齿闭合；`overall_soundscape` 是否写了嗓音质感而不是台词（R62）",
+    "参考画风（R64）：三份资产头两行是不是「参考画风：REF-…（参考，不照搬）」＋「本剧形象：…」；每条提示词是否先写本剧形象（身份／年龄／体型／发型发色／服装款式与磨损／伤势／随身物；场景写剧情要求的布局与时代痕迹；道具写剧情要求的形状尺寸材质磨损），再写参考画风只取质感／配色／材质／打光；有没有照搬参考图里的人脸长相、姿态、构图、服装款式、建筑与道具种类；参考图与剧情冲突时是不是以剧情为准",
 ]
 
 
@@ -1725,7 +1760,7 @@ def report(fails, warns, notes, info, _unused, segs):
         if info.get("scene_ids"):
             print("场景资产：选择=%s，场景=%s 个" % (info.get("scene_choice"), info["scene_ids"]))
         if info.get("style"):
-            print("画风声明：%s（REF 编号与尾巴见上）" % info["style"])
+            print("参考画风：%s（只作质感参考，形象按剧情）" % info["style"])
         if notes.get("camera_gaze"):
             print("R49 看镜头写法：%d 处（明细见 FAIL）" % notes["camera_gaze"])
         if notes.get("fight") and notes["fight"][0]:
@@ -1759,3 +1794,4 @@ def report(fails, warns, notes, info, _unused, segs):
 
 if __name__ == "__main__":
     sys.exit(main())
+
