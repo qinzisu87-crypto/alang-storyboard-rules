@@ -985,6 +985,116 @@ VFX_KEYS = ("形态", "光源", "起", "中", "收")
 VFX_BANNED = ("炫酷", "特效拉满", "光效强烈", "光效拉满", "特效炸裂", "大片感特效")
 
 
+FIGHT_EN = ("blades lock", "blade lock", "cross-parry", "shockwave", "dust wave",
+            "stone cracks", "cracks", "debris", "gravel", "stagger", "bracing back",
+            "bracing", "thrown back", "rebound", "sparks", "armor chips", "motion blur",
+            "upward cut", "downward chop", "horizontal sweep", "ground-skimming",
+            "airborne spin", "charge", "drive off", "send the shoulder")
+
+FIGHT_BANNED = ("两人激烈交锋", "激烈交锋", "一顿猛攻", "不分胜负", "打成一片",
+                "激战正酣", "打得难分难解", "打得难解难分")
+
+RE_FIGHT_ROUND = re.compile(r"^[ \t]*[-*]?\s*回合\s*[0-9一二三四五六七八九十]+\s*[：:]")
+RE_FIGHT_TAG = re.compile(r"^[ \t]*\[FIGHT\]", re.I)
+RE_CIRCLED = re.compile(r"[①②③④⑤⑥⑦⑧⑨⑩]")
+
+
+def check_fight(script_txt, board_txt, seg_txt, fails, warns):
+    """R61：有打斗的场，回合三段齐全、声音分层、分镜一镜一回合且受力有结果、分段有打斗英文词。"""
+    if not script_txt:
+        return (0, 0)
+    scenes = []
+    cur = None
+    for line in script_txt.splitlines():
+        m = RE_SCENE_ID.match(line)
+        if m:
+            cur = [m.group(1), []]
+            scenes.append(cur)
+            continue
+        if line.startswith("## "):
+            cur = None
+            continue
+        if cur is not None:
+            cur[1].append(line)
+
+    fight_scenes = 0
+    rounds_total = 0
+    for sid, lines in scenes:
+        rounds = []
+        for ln in lines:
+            s = ln.strip()
+            if RE_FIGHT_ROUND.match(ln) or RE_FIGHT_TAG.match(ln):
+                rounds.append(s)
+        if not rounds:
+            if any("打斗回合" in l for l in lines):
+                fails.append("%s 写了「打斗回合」标题但没有回合行；每回合一行 `- 回合 N：谁先动｜接触点：…｜结果：…`（R61.2）" % sid)
+            continue
+        fight_scenes += 1
+        rounds_total += len(rounds)
+        if len(rounds) > 6:
+            warns.append("%s 有 %d 个回合／一组超过 6 个回合；按剧情拆成 2–3 组打斗，一组 3–6 回合（R61.2）" % (sid, len(rounds)))
+        for r in rounds:
+            body = r.split("：", 1)[-1] if "：" in r else r
+            body = re.sub(r"^\[FIGHT\]\s*", "", body).strip()
+            segs = [p for p in re.split(r"[｜|]", body) if p.strip()]
+            if len(segs) < 3:
+                fails.append("%s 的回合行缺段：`%s`；必须写全 谁先动｜接触点｜结果 三段（R61.2）" % (sid, r[:40]))
+                continue
+            if "接触点" not in r:
+                warns.append("%s 的回合行没标「接触点」；写成 `谁先动｜接触点：在哪一高度哪一角度接上｜结果：谁被推成什么姿态`（R61.2）" % sid)
+        sfx = [l for l in lines if l.strip().startswith("[SFX]")]
+        if not sfx:
+            fails.append("%s 有打斗但没有任何 `[SFX]` 行；打斗声音要分层（低频底／瞬时声／空间余响），一句「打斗声」不合格（R61.5）" % sid)
+        elif len(rounds) >= 3 and len(sfx) < 2:
+            warns.append("%s 有 %d 个回合但只有 %d 条 `[SFX]`；建议一回合一行写三层声（R61.5）" % (sid, len(rounds), len(sfx)))
+        for w in FIGHT_BANNED:
+            if any(w in l for l in lines):
+                fails.append("%s 出现空词「%s」；每一击都要写成可见的接触点与受力结果（R61.7）" % (sid, w))
+                break
+
+    if not fight_scenes:
+        return (0, 0)
+
+    # 分镜层：打斗场的镜数、镜长、「动作先后」拍数
+    board_scenes = split_blocks(board_txt, RE_BOARD_SCENE)
+    checked = 0
+    for blk in board_scenes:
+        head = blk["m"].group(0) + "\n" + blk["body"][:300]
+        if not any(k in head for k in ("打斗", "激战", "交手", "对冲", "为战", "厮杀")) and "来源：" not in head:
+            continue
+        shots = split_blocks(blk["body"], RE_SHOT)
+        if not shots:
+            continue
+        checked += 1
+        if len(shots) < 6:
+            warns.append("%s 的打斗场只有 %d 镜；起势 1 ＋ 交手 ≥4 ＋ 收势 1，一场 ≥6 镜（R61.6）"
+                         % (blk["m"].group(0).strip(), len(shots)))
+        for sh in shots:
+            where = "镜头 " + sh["m"].group(1)
+            fields = field_lines(sh["body"])
+            dur = re.search(r"镜长\s*(\d+)\s*秒", fields.get("拍摄手法", ""))
+            if dur and int(dur.group(1)) > 3:
+                warns.append("%s 打斗镜 %s 秒，超过 3 秒；打斗镜 1–2 秒为主、最长 3 秒（R61.6）"
+                             % (where, dur.group(1)))
+            beats = RE_CIRCLED.findall(fields.get("动作先后", ""))
+            if len(beats) < 3:
+                warns.append("%s 的「动作先后」只写了 %d 拍；打斗镜 ≥3 拍（蹬地／送肩 → 挥出 → 咬合 → 爆开 → 后仰／退步）（R61.6）"
+                             % (where, len(beats)))
+    if checked:
+        for w in FIGHT_BANNED:
+            if w in board_txt:
+                fails.append("分镜.md 出现空词「%s」；打斗镜要写具体接触点与受力结果（R61.7）" % w)
+                break
+
+    # 分段层：打斗英文词与受力结果
+    if seg_txt:
+        low = seg_txt.lower()
+        if not any(k in low for k in FIGHT_EN):
+            warns.append("分段视频提示词.md 没有任何打斗英文词（blades lock／shockwave／dust wave／stone cracks／stagger…）；"
+                         "打斗回合要落进 detailed_description，术语见 `references/打斗模板.md` 第三节（R61.8）")
+    return (fight_scenes, rounds_total)
+
+
 def check_vfx(script_txt, board_txt, seg_txt, fails, warns):
     """R59：有特效的场，[VFX] 五段写全、[SFX] 一特效一行、[LIGHT] 不缺席，特效词进分镜与分段。"""
     if not script_txt:
@@ -1388,6 +1498,9 @@ def main():
     # ---------- 特效（R59） ----------
     notes["vfx"] = check_vfx(script_txt, board_txt, seg_txt, fails, warns)
 
+    # ---------- 打斗（R61） ----------
+    notes["fight"] = check_fight(script_txt, board_txt, seg_txt, fails, warns)
+
     # ---------- 跨文件 ----------
     board_total = sum(v for v in shot_durs.values() if v)
     seg_total = sum(seg_durs)
@@ -1460,6 +1573,7 @@ HUMAN = [
     "三类资产是否都只交了提示词与槽号，没有图片文件、路径或「已出图」说法，交付报告没把提示词说成图片已生成（R30）",
     "每段段数是否由镜长决定，不是硬凑",
     "转场（R57）：每镜「转场出」的末帧状态与下一镜「承接」的五项（动作／朝向／重心／手持物／光位）是否真对得上；前段 Exit 与后段 Entry 的方式与末帧是否同一套说法；是否出现黑场／闪白／叠化／淡入淡出，或转场遮脸遮嘴、拦腰打断正在说的台词",
+    "打斗（R61）：该场「打斗回合」每回合三段（谁先动／接触点／结果）是否都写得出；正文四句式是否落地、身体是否写到关节肌肉承重；有没有连续三回合同一人进攻、有没有一处局面变化；分镜是不是一镜一回合、起势→接触→受力顺序不乱、每击是否都落了可见结果（R61）",
 ]
 
 
@@ -1483,6 +1597,8 @@ def report(fails, warns, notes, info, _unused, segs):
             print("画风声明：%s（REF 编号与尾巴见上）" % info["style"])
         if notes.get("camera_gaze"):
             print("R49 看镜头写法：%d 处（明细见 FAIL）" % notes["camera_gaze"])
+        if notes.get("fight") and notes["fight"][0]:
+            print("R61 打斗：%d 场、%d 个回合" % (notes["fight"][0], notes["fight"][1]))
         if notes["slots"]:
             print("用到的参考图槽：@图片 %s" % "、".join(str(x) for x in sorted(notes["slots"])))
             mx = max(notes["slots"])
