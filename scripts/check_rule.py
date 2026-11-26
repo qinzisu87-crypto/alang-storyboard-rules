@@ -1095,6 +1095,97 @@ def check_fight(script_txt, board_txt, seg_txt, fails, warns):
     return (fight_scenes, rounds_total)
 
 
+RE_SEQ_HEAD = re.compile(r"^[ \t]*[①②③④⑤⑥⑦⑧⑨⑩]")
+RE_TURN_HEAD = re.compile(r"^[ \t]*\*\*说话顺序\*\*[：:]", re.M)
+RE_VOICE_TBL = re.compile(r"^##\s*声音设定", re.M)
+RE_PERF_TBL = re.compile(r"^##\s*表演总则", re.M)
+RE_CN_PAREN = re.compile(r"（[^）]{1,12}）")
+DIALOGUE_PAREN_OK = ("（听不清）", "(听不清)")
+
+
+def check_dialogue_perf(script_txt, board_txt, seg_txt, fails, warns):
+    """R62：对话与人物表情三层——说话顺序、台词干净、分镜台词栏只写次序、分段说话人与口型句。"""
+    dlg_total = 0
+    turns_total = 0
+
+    if script_txt:
+        blocks = split_blocks(script_txt, RE_SCENE_ID)
+        no_turn_scenes = []
+        for blk in blocks:
+            sid = blk["m"].group(1)
+            body = blk["body"]
+            turns = [m for m in RE_TURN_HEAD.finditer(body)]
+            turns_total += len(turns)
+            lines = []
+            for m in RE_DIALOGUE.finditer(body):
+                spk = m.group(1).strip()
+                if any(ch in spk for ch in "*-—|｜"):
+                    continue
+                if spk in ("说话顺序", "表演总则", "声音设定", "本集结尾状态"):
+                    continue
+                lines.append((spk, m.group(2)))
+            if len(lines) >= 5 and not turns:
+                no_turn_scenes.append(sid)
+            for spk, text in lines:
+                dlg_total += 1
+                if "[Chinese]" in text:
+                    fails.append("%s 剧本台词行带了 `[Chinese]`；`[Chinese]` 只出现在分段台词块（R62.3）：%s：%s"
+                                 % (sid, spk, text.strip()[:30]))
+                hits = [p for p in RE_CN_PAREN.findall(text) if p not in DIALOGUE_PAREN_OK]
+                if hits:
+                    warns.append("%s 剧本台词行带括注「%s」；语气与表情写进叙述句，台词只留原文（R62.3）"
+                                 % (sid, hits[0]))
+        if no_turn_scenes:
+            warns.append("%s 有台词但没有「**说话顺序**：① … → ② …」；对话场先排话轮次序（R62.2）"
+                         % "、".join(no_turn_scenes[:3]))
+        if dlg_total >= 40:
+            if not RE_VOICE_TBL.search(script_txt):
+                warns.append("剧本写了 %d 句台词却没有 `## 声音设定`（一人一行：音色／语速／音量／句尾／特殊情况）（R62.6）" % dlg_total)
+            if not RE_PERF_TBL.search(script_txt):
+                warns.append("剧本写了 %d 句台词却没有 `## 表演总则`（情绪先定调／独白不张嘴／一句一人／全片不配乐）（R62.6）" % dlg_total)
+
+    if board_txt:
+        board_shots = split_blocks(board_txt, RE_SHOT)
+        few_tone = []
+        for sh in board_shots:
+            where = "镜头 " + sh["m"].group(1)
+            fields = field_lines(sh["body"])
+            line = fields.get("台词", "").strip()
+            if not line:
+                continue
+            if "[Chinese]" in line:
+                fails.append("%s「台词」栏抄了带 [Chinese] 的台词原文；分镜只写次序（R62.7）" % where)
+            elif not RE_SEQ_HEAD.match(line) and line != "无":
+                fails.append("%s「台词」栏不是 `① 名 → ② 名` 次序（也不是「无」）；分镜不抄台词原文（R62.7）：%s"
+                             % (where, line[:30]))
+            expr = fields.get("表情", "")
+            if expr and ("成" not in expr) and ("特写" not in fields.get("拍摄手法", "")):
+                few_tone.append(where)
+        if dlg_total >= 40 and len(few_tone) * 2 > len(board_shots):
+            warns.append("%d/%d 镜的「表情」栏没写「几成」；表情两层＝情绪＋几成＋对着谁，再写肌肉清单（R62.8）"
+                         % (len(few_tone), len(board_shots)))
+
+    if seg_txt:
+        segs = split_blocks(seg_txt, RE_SEG)
+        for g in segs:
+            num = g["m"].group(1)
+            where = "第 %s 段" % num
+            f = field_lines(g["body"])
+            spk = f.get("说话人", "").strip()
+            sec = _seg_sections(g["body"])
+            detail = _norm_md(sec.get("detailed_description", ""))
+            lines = list(RE_SEG_DIALOGUE.finditer(detail))
+            if spk and spk != "无" and not re.match(r"^[①②③④⑤⑥⑦⑧⑨⑩]", spk):
+                fails.append("%s「说话人」行不是 `① (S1) 名字 → ② (S2) 名字` 格式（R62.10）：%s" % (where, spk[:30]))
+            elif spk and spk != "无" and "(S1)" not in spk:
+                fails.append("%s「说话人」行缺 `(S1)` 首个台词编号（R62.10）：%s" % (where, spk[:30]))
+            if spk == "无" and lines:
+                fails.append("%s「说话人」写「无」但 detailed_description 有 %d 句台词（R62.10）" % (where, len(lines)))
+            if spk and spk != "无" and not lines:
+                fails.append("%s「说话人」写了说话人但台词块是空的（R62.10）" % where)
+    return (dlg_total, turns_total)
+
+
 def check_vfx(script_txt, board_txt, seg_txt, fails, warns):
     """R59：有特效的场，[VFX] 五段写全、[SFX] 一特效一行、[LIGHT] 不缺席，特效词进分镜与分段。"""
     if not script_txt:
@@ -1501,6 +1592,9 @@ def main():
     # ---------- 打斗（R61） ----------
     notes["fight"] = check_fight(script_txt, board_txt, seg_txt, fails, warns)
 
+    # ---------- 对话与表情（R62） ----------
+    notes["talk"] = check_dialogue_perf(script_txt, board_txt, seg_txt, fails, warns)
+
     # ---------- 跨文件 ----------
     board_total = sum(v for v in shot_durs.values() if v)
     seg_total = sum(seg_durs)
@@ -1574,6 +1668,7 @@ HUMAN = [
     "每段段数是否由镜长决定，不是硬凑",
     "转场（R57）：每镜「转场出」的末帧状态与下一镜「承接」的五项（动作／朝向／重心／手持物／光位）是否真对得上；前段 Exit 与后段 Entry 的方式与末帧是否同一套说法；是否出现黑场／闪白／叠化／淡入淡出，或转场遮脸遮嘴、拦腰打断正在说的台词",
     "打斗（R61）：该场「打斗回合」每回合三段（谁先动／接触点／结果）是否都写得出；正文四句式是否落地、身体是否写到关节肌肉承重；有没有连续三回合同一人进攻、有没有一处局面变化；分镜是不是一镜一回合、起势→接触→受力顺序不乱、每击是否都落了可见结果（R61）",
+    "对话与表情（R62）：台词是不是一句一人、每 1–4 句之间有一句身体准备；表情两层（情绪＋几成＋对着谁／眉·眼·鼻·嘴·颈·手）是否齐；正反打有没有连切超过 3 次、听者反应镜有没有抢戏；说话人与听者的口型是否分开写、独白镜是否唇齿闭合；`overall_soundscape` 是否写了嗓音质感而不是台词（R62）",
 ]
 
 
@@ -1599,6 +1694,8 @@ def report(fails, warns, notes, info, _unused, segs):
             print("R49 看镜头写法：%d 处（明细见 FAIL）" % notes["camera_gaze"])
         if notes.get("fight") and notes["fight"][0]:
             print("R61 打斗：%d 场、%d 个回合" % (notes["fight"][0], notes["fight"][1]))
+        if notes.get("talk") and notes["talk"][0]:
+            print("R62 对话：%d 句台词、%d 个话轮" % (notes["talk"][0], notes["talk"][1]))
         if notes["slots"]:
             print("用到的参考图槽：@图片 %s" % "、".join(str(x) for x in sorted(notes["slots"])))
             mx = max(notes["slots"])
