@@ -1320,6 +1320,39 @@ def check_seam(seg_detail_pairs, fails, warns):
     return pairs
 
 
+def check_one_shot(shots, segs, shot_durs, fails):
+    """R63：一镜一段。段数=镜数、一段只有一个 [Shot 1]、段时长=对应镜镜长。
+    旧格式（段内仍写 At MM:SS.mmm 的打包稿）按不回溯原则只提示、不判错。"""
+    at_re = re.compile(r"At\s+\d{2}:\d{2}\.\d{3}")
+    n_shots, n_segs = len(shots), len(segs)
+    legacy = any(at_re.search(g["body"]) for g in segs)
+    multi = []
+    for g in segs:
+        n = len(RE_SHOT_TAG.findall(g["body"]))
+        if n > 1:
+            multi.append((g["m"].group(1), n))
+    if not legacy:
+        if n_segs > n_shots:
+            fails.append("分段 %d 段多于分镜 %d 镜：一镜一段不许拆段（R63）" % (n_segs, n_shots))
+        elif n_segs < n_shots:
+            fails.append("分段 %d 段少于分镜 %d 镜：一镜一段要求段数＝镜数，别把镜头组合进一段（R63）"
+                         % (n_segs, n_shots))
+        for num, n in multi:
+            fails.append("第 %s 段有 %d 个 [Shot]：一段只许一个 [Shot 1]（R63）" % (num, n))
+        if n_shots == n_segs:
+            ids = [s["m"].group(1) for s in shots]
+            for idx, g in enumerate(segs):
+                num = g["m"].group(1)
+                dd_s = field_lines(g["body"]).get("时长", "").split("\n")[0]
+                dd_s = re.sub(r"[^\d]", "", dd_s)
+                dd = int(dd_s) if dd_s else None
+                sd = shot_durs.get(ids[idx]) if idx < len(ids) else None
+                if sd and dd and sd != dd:
+                    fails.append("第 %s 段时长 %d 秒 ≠ 镜头 %s 镜长 %d 秒（R63 段长＝镜长）"
+                                 % (num, dd, ids[idx], sd))
+    return {"shots": n_shots, "segs": n_segs, "legacy": legacy, "multi": len(multi)}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--project", required=True)
@@ -1579,6 +1612,9 @@ def main():
         if ("转场" in scene_txt) and not re.search(r"hard cut|cuts to|transitions to", detail, re.I):
             fails.append("%s 声明了转场，但 detailed_description 切点没写 hard cut / cuts to（R19）" % where)
 
+    # ---------- 一镜一段（R63） ----------
+    notes["oneshot"] = check_one_shot(shots, segs, shot_durs, fails)
+
     # ---------- 转场（R57） ----------
     allow_trans = args.allow_transition or ("用户指定转场" in script_txt) or ("转场（用户指定" in board_txt) or ("转场（用户指定" in seg_txt)
     check_transitions(shot_pr_pairs, seg_detail_pairs, allow_trans, fails, warns)
@@ -1665,7 +1701,7 @@ HUMAN = [
     "人物资产四项是否齐（面部特写／正面／侧面／背面）、有没有多余的 A／B 分层或本集选择行，四张之间同一张脸与身高比例服装配饰是否一致（R28）",
     "场景资产是否只出了用户点的那层，A2–A4 每条是否可粘提示词带图槽，A3 布局图里画不画得出锚点物，B6 空间规则与 R26 站位是否一致（R29）",
     "三类资产是否都只交了提示词与槽号，没有图片文件、路径或「已出图」说法，交付报告没把提示词说成图片已生成（R30）",
-    "每段段数是否由镜长决定，不是硬凑",
+    "一镜一段（R63）：分镜有多少镜、分段是否就有多少段，段名与镜名是否同名，每段是否只有一个 [Shot 1] 且没有段内时间码；不足 4 秒的镜是否已在分镜层并进相邻镜（动作一句没丢），超过 15 秒的镜是否已拆成两镜",
     "转场（R57）：每镜「转场出」的末帧状态与下一镜「承接」的五项（动作／朝向／重心／手持物／光位）是否真对得上；前段 Exit 与后段 Entry 的方式与末帧是否同一套说法；是否出现黑场／闪白／叠化／淡入淡出，或转场遮脸遮嘴、拦腰打断正在说的台词",
     "打斗（R61）：该场「打斗回合」每回合三段（谁先动／接触点／结果）是否都写得出；正文四句式是否落地、身体是否写到关节肌肉承重；有没有连续三回合同一人进攻、有没有一处局面变化；分镜是不是一镜一回合、起势→接触→受力顺序不乱、每击是否都落了可见结果（R61）",
     "对话与表情（R62）：台词是不是一句一人、每 1–4 句之间有一句身体准备；表情两层（情绪＋几成＋对着谁／眉·眼·鼻·嘴·颈·手）是否齐；正反打有没有连切超过 3 次、听者反应镜有没有抢戏；说话人与听者的口型是否分开写、独白镜是否唇齿闭合；`overall_soundscape` 是否写了嗓音质感而不是台词（R62）",
@@ -1696,6 +1732,10 @@ def report(fails, warns, notes, info, _unused, segs):
             print("R61 打斗：%d 场、%d 个回合" % (notes["fight"][0], notes["fight"][1]))
         if notes.get("talk") and notes["talk"][0]:
             print("R62 对话：%d 句台词、%d 个话轮" % (notes["talk"][0], notes["talk"][1]))
+        if notes.get("oneshot"):
+            o = notes["oneshot"]
+            tail = "（旧格式多镜打包，按不回溯未判错）" if o["legacy"] else ""
+            print("R63 分段＝镜数 %d／段数 %d%s" % (o["shots"], o["segs"], tail))
         if notes["slots"]:
             print("用到的参考图槽：@图片 %s" % "、".join(str(x) for x in sorted(notes["slots"])))
             mx = max(notes["slots"])
