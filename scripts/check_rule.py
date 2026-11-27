@@ -101,7 +101,7 @@ CJK = re.compile(r"[\u4e00-\u9fa5]")
 
 
 def check_no_timecode(pr, where, fails):
-    """R13：分镜提示词不写时间码；分段层按官方 Ref2VA 切点，不套本函数。"""
+    """R13：分镜提示词不写时间码；分镜视频层按官方 Ref2VA 切点，不套本函数。"""
     hits = [(i, m.group(0)) for i, l in enumerate(pr.splitlines(), 1)
             for m in TIME_CODE_RE.finditer(l)]
     for line_no, code in hits[:3]:
@@ -920,7 +920,7 @@ def check_style(texts, fails, warns):
 
 def check_coverage(script_txt, board_txt, seg_txt, asset_txt, defined, fails, warns):
     """R44：剧本／分镜／分段里出现的人物、场景、道具，资产表必须有；未用到的资产标「未使用」。"""
-    layers = (("剧本.md", script_txt), ("分镜.md", board_txt), ("分段视频提示词.md", seg_txt))
+    layers = (("剧本.md", script_txt), ("分镜.md", board_txt), ("分镜视频.md", seg_txt))
     used = set()
     for _, txt in layers:
         for m in RE_ID_REF.finditer(txt):
@@ -979,7 +979,7 @@ REAL_ID_RE = re.compile(r"@(?:C|S|P)\d{2}")
 
 def check_placeholders(shots, board_txt, seg_txt, fails, warns):
     """R58：反推没有实拍资产图，图槽一律写人物一／场景一／道具一占位，不编 C／S／P 真编号。"""
-    for name, txt in (("分镜.md", board_txt), ("分段视频提示词.md", seg_txt)):
+    for name, txt in (("分镜.md", board_txt), ("分镜视频.md", seg_txt)):
         if "已出图" in txt or "见附图" in txt:
             fails.append("%s 出现「已出图」／「见附图」；反推只交提示词与占位，不出图、不暗示有图（R58／R30）" % name)
         ids = REAL_ID_RE.findall(txt)
@@ -1012,7 +1012,7 @@ def check_placeholders(shots, board_txt, seg_txt, fails, warns):
         warns.append("分镜.md 的图槽没写「（空缺占位）」标注；建议在每个 `@图片 N 人物一` 后补这四个字，方便后续挂真图（R58）")
     for n in sorted(names):
         if n not in seg_txt:
-            warns.append("占位名「%s」在 分段视频提示词.md 里没出现；分段的 `<Subject N>（图片名：…）` 要与分镜占位同名（R58）" % n)
+            warns.append("占位名「%s」在 分镜视频.md 里没出现；分段的 `<Subject N>（图片名：…）` 要与分镜占位同名（R58）" % n)
 
 
 VFX_KEYS = ("形态", "光源", "起", "中", "收")
@@ -1121,11 +1121,11 @@ def check_fight(script_txt, board_txt, seg_txt, fails, warns):
                 fails.append("分镜.md 出现空词「%s」；打斗镜要写具体接触点与受力结果（R61.7）" % w)
                 break
 
-    # 分段层：打斗英文词与受力结果
+    # 分镜视频层：打斗英文词与受力结果
     if seg_txt:
         low = seg_txt.lower()
         if not any(k in low for k in FIGHT_EN):
-            warns.append("分段视频提示词.md 没有任何打斗英文词（blades lock／shockwave／dust wave／stone cracks／stagger…）；"
+            warns.append("分镜视频.md 没有任何打斗英文词（blades lock／shockwave／dust wave／stone cracks／stagger…）；"
                          "打斗回合要落进 detailed_description，术语见 `references/打斗模板.md` 第三节（R61.8）")
     return (fight_scenes, rounds_total)
 
@@ -1293,10 +1293,10 @@ def check_vfx(script_txt, board_txt, seg_txt, fails, warns):
             elif keys and not any(k in hit for k in keys):
                 warns.append("%s 的特效名（%s）一个都没出现在分镜这一场；场标题括号里要先列本场特效清单，再落进四处（R59.5）"
                              % (sid, "、".join(keys[:3])))
-        # 分段层：英文术语是否真落进去了
+        # 分镜视频层：英文术语是否真落进去了
         if not re.search(r"rune|arc|halo|pillar|formation|array|vortex|chain|lightning|flame|glow|ward",
                          seg_txt, re.I):
-            warns.append("分段视频提示词.md 里没有任何特效英文词（rune／arc／halo／pillar／formation…）；"
+            warns.append("分镜视频.md 里没有任何特效英文词（rune／arc／halo／pillar／formation…）；"
                          "特效阶段要写进 detailed_description，术语见 `references/特效模板.md` 第三节（R59.6）")
         for name, txt in (("剧本.md", script_txt), ("分镜.md", board_txt)):
             if re.search(r"配乐\s*[:：]|背景音乐|BGM|b\s?g\s?m", txt):
@@ -1601,7 +1601,7 @@ def main():
     ap.add_argument("--skip-script", action="store_true", help="R33 跳过剧本模式：不要求 剧本.md")
     ap.add_argument("--require-handoff", action="store_true", help="R45：缺少或不完整的 项目交接.md 直接判 FAIL")
     ap.add_argument("--reverse", action="store_true",
-                    help="R58 视频反推模式：只要求 分镜.md 与 分段视频提示词.md，不要求剧本与三类资产；另查占位命名（人物一／场景一／道具一）")
+                    help="R58 视频反推模式：只要求 分镜.md 与 分镜视频.md，不要求剧本与三类资产；另查占位命名（人物一／场景一／道具一）")
     ap.add_argument("--allow-transition", action="store_true",
                     help="放行黑场／闪白／叠化／淡入淡出（只在反推原片本身用了这些转法时用）")
     args = ap.parse_args()
@@ -1617,7 +1617,12 @@ def main():
 
     script_p = ep_dir / "剧本.md"
     board_p = ep_dir / "分镜.md"
-    seg_p = ep_dir / "分段视频提示词.md"
+    seg_p = ep_dir / "分镜视频.md"
+    legacy_seg = ep_dir / "分段视频提示词.md"
+    seg_is_legacy = False
+    if not seg_p.is_file() and legacy_seg.is_file():
+        seg_p = legacy_seg
+        seg_is_legacy = True
     asset_p = ep_dir / "资产提示词.md"
     char_p = ep_dir / "人物资产.md"
     scene_p = ep_dir / "场景资产.md"
@@ -1632,17 +1637,19 @@ def main():
     script_txt = read_text(script_p) if script_p.is_file() else ""
     board_txt = read_text(board_p)
     seg_txt = read_text(seg_p)
+    if seg_is_legacy:
+        warns.append("本集的分镜视频还叫旧名 `分段视频提示词.md`（R69 起统一叫 `分镜视频.md`）；内容不改也照样查，下一轮交付请换新名")
     asset_txt = read_text(asset_p) if asset_p.is_file() else ""
 
     # ---------- R49 第三视角，人物不看镜头 ----------
     gaze_total = 0
-    for name, txt in (("分镜.md", board_txt), ("分段视频提示词.md", seg_txt)):
+    for name, txt in (("分镜.md", board_txt), ("分镜视频.md", seg_txt)):
         gaze_total += check_camera_gaze(txt, name, fails)
     notes["camera_gaze"] = gaze_total
 
     if args.reverse:
         notes["reverse"] = True
-        warns.append("反推模式（R58）：只校验 分镜.md 与 分段视频提示词.md；剧本、三类资产、项目交接均不要求。交付只许给这两份。")
+        warns.append("反推模式（R58）：只校验 分镜.md 与 分镜视频.md；剧本、三类资产、项目交接均不要求。交付只许给这两份（分镜视频旧名 `分段视频提示词.md` 仍可读，R69）。")
     # ---------- 剧本 ----------
     if args.skip_script and not script_txt:
         notes["script_skipped"] = True
@@ -1663,7 +1670,7 @@ def main():
             fails.append("剧本台词行说话人超过 8 字或含标点，解析会漏检：%s" % line.strip()[:20])
 
     # ---------- 分镜 ----------
-    for name, txt in (("分镜.md", board_txt), ("分段视频提示词.md", seg_txt)):
+    for name, txt in (("分镜.md", board_txt), ("分镜视频.md", seg_txt)):
         glued = 0
         for line in txt.splitlines():
             s = line.strip()
@@ -1709,7 +1716,7 @@ def main():
         if script_txt:
             check_ids(script_txt, "剧本.md", defined, fails)
         check_ids(board_txt, "分镜.md", defined, fails)
-        check_ids(seg_txt, "分段视频提示词.md", defined, fails)
+        check_ids(seg_txt, "分镜视频.md", defined, fails)
     notes["assets"] = len(defined)
     if args.reverse:
         check_placeholders(shots, board_txt, seg_txt, fails, warns)
@@ -1827,7 +1834,7 @@ def main():
     # ---------- 分段 ----------
     segs = split_blocks(seg_txt, RE_SEG)
     if not segs:
-        fails.append("分段视频提示词.md 未找到段标题（应为「## 第 N 段 ｜ 场名」）")
+        fails.append("分镜视频.md 未找到段标题（应为「## 第 N 段 ｜ 场名」）")
 
     seg_prompt_all = []
     seg_detail_pairs = []
@@ -1923,7 +1930,7 @@ def main():
         if len(gap) < 2:
             continue
         expected = script_txt.count(gap)
-        for name, blob in (("分镜.md", board_p), ("分段视频提示词.md", seg_p)):
+        for name, blob in (("分镜.md", board_p), ("分镜视频.md", seg_p)):
             n = blob.count(gap)
             if n != expected:
                 fails.append("台词「%s」在%s出现 %d 次（应为 %d 次，逐字一致且只说一遍）"
@@ -1969,7 +1976,7 @@ HUMAN = [
     "参考画风（R64）：三份资产头两行是不是「参考画风：REF-…（参考，不照搬）」＋「本剧形象：…」；每条提示词是否先写本剧形象（身份／年龄／体型／发型发色／服装款式与磨损／伤势／随身物；场景写剧情要求的布局与时代痕迹；道具写剧情要求的形状尺寸材质磨损），再写参考画风只取质感／配色／材质／打光；有没有照搬参考图里的人脸长相、姿态、构图、服装款式、建筑与道具种类；参考图与剧情冲突时是不是以剧情为准",
     "逐件确认（R65）：这一轮是不是只交了一件（分段那轮是「分段＋交接」两件同批）；剧本→人物资产→场景道具→分镜→分段＋交接，每道门是否都等到了用户明确的「可以／继续」；有没有在用户没点头时顺手做下一件、或在交付时预告了下一件内容。",
     "译写对账（R66）：把分镜第 N 镜的九栏与第 N 段并排读——景别／机位高度／角度／轴线／运动是否都译进 [Shot 1] 与「场景与轴线」（50mm、1.5 米、约七十度斜角、固定加一次极轻推近要读得出来）；动作是否照原句的关节承重位移写、没被替换成别的动作；「动作先后」几拍就几组动作分句；「表情」的几成与眉／眼／瞳孔／鼻／咬肌／唇／喉／肩颈／手是否逐项落进英文表情句；自然规律的光位、投影、雾、白气、水痕是否进了 Shot 句；声音是否只进 overall_soundscape 与嗓音提示、没抄台词；台词是否逐字进 (Sx) 块；参考图是否只进元数据与图槽、正文写中文名；起幅与「承接」「转场出」是否各自变成 Shot 句开头、Entry、Exit。有没有多出分镜没有的动作／台词／道具／镜头，有没有把「理由」「为了让……」译进正文，有没有改景别机位，有没有两镜并一段。",
-    "分镜全信息稿（R67）：台词原文、表情五段、打斗回合、光效起中收是不是都在分镜层写完了——「台词」栏非「无」的镜提示词里有几句 `角色（…）：原文`，说几句写几行；打斗镜「动作」栏首句是不是 `回合 N｜谁先动｜接触点｜结果`；带光效的打斗同镜提示词是否 起→中→收 三阶段齐、`转场出：` 是否写了衰减档位；有没有哪一样是留到分段层才补的（有就退回补分镜）",
+    "分镜全信息稿（R67）：台词原文、表情五段、打斗回合、光效起中收是不是都在分镜层写完了——「台词」栏非「无」的镜提示词里有几句 `角色（…）：原文`，说几句写几行；打斗镜「动作」栏首句是不是 `回合 N｜谁先动｜接触点｜结果`；带光效的打斗同镜提示词是否 起→中→收 三阶段齐、`转场出：` 是否写了衰减档位；有没有哪一样是留到分镜视频层才补的（有就退回补分镜）",
     "陈述句体（R68）：每镜是不是写成普通陈述句、像作文一样把这个镜头讲清楚——镜头多少毫米、机位几米、略仰略俯还是平视、固定还是推近跟移；人物先动哪只手哪只脚、重心怎么移；表情几成、眉眼嘴怎么动、视线落在哪；台词是谁说的、语速音量尾音怎么收；末帧停在什么画面上。有没有退回成条目罗列（「- 拍摄手法：」那种九栏标签），有没有漏掉镜长秒数",
 ]
 
