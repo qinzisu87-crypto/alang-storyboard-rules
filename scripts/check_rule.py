@@ -1430,6 +1430,50 @@ def check_transcode(shot_frames, segs, warns):
     return {"pairs": pairs, "bad": bad}
 
 
+MUSCLE_KEYS = ("眉", "眼", "睫", "瞳", "鼻", "嘴", "唇", "咬肌", "喉", "下颌", "肩颈")
+RE_PR_TALK = re.compile(r"[）)]\s*[：:]\s*[^\s]")
+
+
+def check_board_full(board_txt, shot_frames, warns):
+    """R67：分镜是全信息稿——台词原文、打斗回合、表情五段先在分镜写完，不留给分段现编。"""
+    if not board_txt or not shot_frames:
+        return {"talk": 0, "round": 0, "expr": 0}
+    fight_secs = set()
+    for blk in split_blocks(board_txt, RE_BOARD_SCENE):
+        if "打斗回合" in blk["body"]:
+            fight_secs.add(blk["m"].group(1))
+    talk_bad, round_bad, expr_bad = 0, 0, 0
+    for sf in shot_frames:
+        sid, f, pr = sf["id"], sf["f"], sf["pr"]
+        where = "镜头 " + sid
+        tline = f.get("台词", "").strip()
+        n_speak = len(RE_CIRCLED.findall(tline))
+        if n_speak and not tline.startswith("无"):
+            n_pr = len(RE_PR_TALK.findall(pr))
+            if n_pr < n_speak:
+                talk_bad += 1
+                warns.append("%s 「台词」栏有 %d 句，提示词里只找到 %d 行 `角色（…）：原文`；台词原文先写进分镜提示词，分段才有得译（R67.3）"
+                             % (where, n_speak, n_pr))
+        expr = f.get("表情", "")
+        m = re.search(r"([0-9]+|[一二三四五六七八九十])\s*成", expr)
+        if m:
+            hit = sum(1 for k in MUSCLE_KEYS if k in expr)
+            if hit < 2:
+                expr_bad += 1
+                warns.append("%s 「表情」栏写了 %s 成，但肌肉只剩 %d 处；五段齐：情绪＋几成＋对着谁｜眉·眼·鼻·嘴·颈·手（R67.2）"
+                             % (where, m.group(1), hit))
+        sec = sid.split("-")[0]
+        if sec in fight_secs:
+            act = f.get("动作", "")
+            first = re.split(r"。", act, 1)[0]
+            kw = ("砍", "劈", "刺", "挡", "格", "撞", "踢", "拳", "掌", "刀", "剑", "枪", "刃", "震")
+            if any(k in act for k in kw) and first.count("｜") < 2:
+                round_bad += 1
+                warns.append("%s 在第 %s 场的打斗里，但「动作」栏首句没有 `回合 N｜谁先动｜接触点｜结果` 三段行；回合先在分镜写全（R67.4）"
+                             % (where, sec))
+    return {"talk": talk_bad, "round": round_bad, "expr": expr_bad}
+
+
 def check_one_shot(shots, segs, shot_durs, fails):
     """R63：一镜一段。段数=镜数、一段只有一个 [Shot 1]、段时长=对应镜镜长。
     旧格式（段内仍写 At MM:SS.mmm 的打包稿）按不回溯原则只提示、不判错。"""
@@ -1730,6 +1774,9 @@ def main():
     # ---------- 译写对账（R66） ----------
     notes["transcode"] = check_transcode(shot_frames, segs, warns)
 
+    # ---------- 分镜全信息稿（R67） ----------
+    notes["boardfull"] = check_board_full(board_txt, shot_frames, warns)
+
     # ---------- 转场（R57） ----------
     allow_trans = args.allow_transition or ("用户指定转场" in script_txt) or ("转场（用户指定" in board_txt) or ("转场（用户指定" in seg_txt)
     check_transitions(shot_pr_pairs, seg_detail_pairs, allow_trans, fails, warns)
@@ -1823,6 +1870,7 @@ HUMAN = [
     "参考画风（R64）：三份资产头两行是不是「参考画风：REF-…（参考，不照搬）」＋「本剧形象：…」；每条提示词是否先写本剧形象（身份／年龄／体型／发型发色／服装款式与磨损／伤势／随身物；场景写剧情要求的布局与时代痕迹；道具写剧情要求的形状尺寸材质磨损），再写参考画风只取质感／配色／材质／打光；有没有照搬参考图里的人脸长相、姿态、构图、服装款式、建筑与道具种类；参考图与剧情冲突时是不是以剧情为准",
     "逐件确认（R65）：这一轮是不是只交了一件（分段那轮是「分段＋交接」两件同批）；剧本→人物资产→场景道具→分镜→分段＋交接，每道门是否都等到了用户明确的「可以／继续」；有没有在用户没点头时顺手做下一件、或在交付时预告了下一件内容。",
     "译写对账（R66）：把分镜第 N 镜的九栏与第 N 段并排读——景别／机位高度／角度／轴线／运动是否都译进 [Shot 1] 与「场景与轴线」（50mm、1.5 米、约七十度斜角、固定加一次极轻推近要读得出来）；动作是否照原句的关节承重位移写、没被替换成别的动作；「动作先后」几拍就几组动作分句；「表情」的几成与眉／眼／瞳孔／鼻／咬肌／唇／喉／肩颈／手是否逐项落进英文表情句；自然规律的光位、投影、雾、白气、水痕是否进了 Shot 句；声音是否只进 overall_soundscape 与嗓音提示、没抄台词；台词是否逐字进 (Sx) 块；参考图是否只进元数据与图槽、正文写中文名；起幅与「承接」「转场出」是否各自变成 Shot 句开头、Entry、Exit。有没有多出分镜没有的动作／台词／道具／镜头，有没有把「理由」「为了让……」译进正文，有没有改景别机位，有没有两镜并一段。",
+    "分镜全信息稿（R67）：台词原文、表情五段、打斗回合、光效起中收是不是都在分镜层写完了——「台词」栏非「无」的镜提示词里有几句 `角色（…）：原文`，说几句写几行；打斗镜「动作」栏首句是不是 `回合 N｜谁先动｜接触点｜结果`；带光效的打斗同镜提示词是否 起→中→收 三阶段齐、`转场出：` 是否写了衰减档位；有没有哪一样是留到分段层才补的（有就退回补分镜）",
 ]
 
 
@@ -1854,6 +1902,10 @@ def report(fails, warns, notes, info, _unused, segs):
             o = notes["oneshot"]
             tail = "（旧格式多镜打包，按不回溯未判错）" if o["legacy"] else ""
             print("R63 分段＝镜数 %d／段数 %d%s" % (o["shots"], o["segs"], tail))
+        if notes.get("boardfull") and any(notes["boardfull"].values()):
+            bf = notes["boardfull"]
+            print("R67 分镜全信息：台词 %d 处缺／回合 %d 处缺／表情 %d 处缺（明细见 WARN）"
+                  % (bf["talk"], bf["round"], bf["expr"]))
         if notes.get("transcode") and notes["transcode"]["pairs"]:
             t = notes["transcode"]
             print("R66 译写对账 %d 段：%d 处对不上（明细见 WARN）" % (t["pairs"], t["bad"]))
