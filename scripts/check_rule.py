@@ -1594,6 +1594,150 @@ def check_one_shot(shots, segs, shot_durs, fails):
     return {"shots": n_shots, "segs": n_segs, "legacy": legacy, "multi": len(multi)}
 
 
+
+# ---------------- R70 六列镜头表 ----------------
+
+HOOK_WORDS = ("setup", "visual-joke", "reversal", "reveal", "callback",
+              "suspense", "tender", "chase", "expression-beat", "climax")
+HOOK_STRONG = ("visual-joke", "reversal", "reveal", "suspense", "tender", "climax")
+HOOK_TURN = ("reveal", "reversal", "callback")
+RE_CELL_TC = re.compile(r"(\d+(?:\.\d+)?)\s*[\u2013\u2014~-]\s*(\d+(?:\.\d+)?)\s*s")
+RE_STORY_SHOT = re.compile(r"^##\s*\u955c\s*(\d+-\d+)\s*/\s*(\d+)\s*s", re.M)
+STORY_FIELDS = ("钩子类型", "场景与角色", "空间锚卡", "固定地标", "角色位置",
+                "离场角色状态", "光照基线", "连续性", "双重绑定", "逐格四象限")
+ANCHOR_FIELDS = ("地标", "角色位置", "离场", "光照")
+
+
+def parse_shot_table(text):
+    rows = []
+    for line in text.splitlines():
+        s = line.strip()
+        if not s.startswith("|"):
+            continue
+        cells = [c.strip() for c in s.strip("|").split("|")]
+        if len(cells) < 6:
+            continue
+        m = re.match(r"^镜\s*(\d+)-(\d+)\s*/\s*([\d.]+)\s*s$", cells[0])
+        if not m:
+            continue
+        rows.append({
+            "id": "%s-%s" % (m.group(1), m.group(2)),
+            "dur": int(float(m.group(3))),
+            "handoff": cells[1],
+            "anchors": cells[2],
+            "hook": cells[3],
+            "desc": cells[4],
+            "audio": cells[5],
+            "nl": len(cells),
+        })
+    return rows
+
+
+def check_shot_table(board_txt, rows, story_txt, script_txt, fails, warns, notes):
+    """R70：六列齐、六项自检、逐秒覆盖、钩子密度、锚卡四子字段、台词只在列6。"""
+    if not rows:
+        return {"rows": 0}
+    if "镜头表自检" not in board_txt:
+        fails.append("镜头表缺六项自检结论（应在表格上方写「镜头表自检：…」六条 PASS/FAIL，R70.5）")
+    else:
+        tail = board_txt.split("镜头表自检", 1)[1][:900]
+        for k in ("钩子密度", "单镜时长", "单镜人数", "空间锚继承", "逐秒覆盖", "跨镜连贯链"):
+            if k not in tail:
+                warns.append("镜头表自检结论缺「%s」一项（六项逐条写，R70.5）" % k)
+        if "FAIL" in tail:
+            warns.append("自检结论里还有 FAIL 就往下写了：回镜头表改完整轮重跑再说（R70.5）")
+    bad_col = [r["id"] for r in rows if r["nl"] != 6]
+    if bad_col:
+        warns.append("%d 行不是六格（镜头表列名与顺序不许动，R70.2）：%s"
+                     % (len(bad_col), "、".join("镜 %s" % x for x in bad_col[:3])))
+    bad_hook = [r["id"] for r in rows if not r["hook"] or r["hook"].strip() not in HOOK_WORDS]
+    if bad_hook:
+        warns.append("%d 镜的钩子不在受控词表内（setup／reveal／reversal 等，R70.5）：%s"
+                     % (len(bad_hook), "、".join("镜 %s" % x for x in bad_hook[:3])))
+    windows = 0
+    for i in range(len(rows) - 2):
+        windows += 1
+        win = rows[i:i + 3]
+        if not any(any(h in (r["hook"] or "") for h in HOOK_TURN) for r in win):
+            warns.append("连续三镜（镜 %s→%s）没有 reveal／reversal／callback，节奏塌（R70.5）"
+                         % (win[0]["id"], win[2]["id"]))
+    short_sec = []
+    for r in rows:
+        if not (4 <= r["dur"] <= 15):
+            fails.append("镜 %s 镜长 %d 秒不在 4–15 整数（R17／R63）" % (r["id"], r["dur"]))
+        cnt = len(RE_CELL_TC.findall(r["desc"]))
+        if cnt < r["dur"]:
+            short_sec.append((r["id"], cnt, r["dur"]))
+        miss = [k for k in ANCHOR_FIELDS if k not in r["anchors"]]
+        if miss:
+            warns.append("镜 %s 列3 缺子字段：%s（地标／角色位置／离场角色／光照四样必填，R70.3）"
+                         % (r["id"], "、".join(miss)))
+    if short_sec:
+        warns.append("%d 镜逐秒条数少于秒数（每秒一条，R70.4）：%s"
+                     % (len(short_sec), "、".join("镜 %s %d条/%d秒" % x for x in short_sec[:3])))
+    # 台词只在列6
+    if script_txt:
+        for m in RE_DIALOGUE.finditer(script_txt):
+            spk, txt = m.group(1), m.group(2).strip()
+            if len(txt) < 4 or "*" in spk or "→" in txt:
+                continue
+            for r in rows:
+                if txt in r["desc"]:
+                    fails.append("台词「%s」抄进了镜 %s 的列5（原文只写列6，R70.6）"
+                                 % (txt[:12], r["id"]))
+                    break
+    notes["table"] = {"rows": len(rows), "windows": windows,
+                      "bad_hook": len(bad_hook), "short": len(short_sec)}
+    if story_txt:
+        check_story_storyboard(story_txt, rows, fails, warns)
+    elif True:
+        fails.append("缺文件：分镜/文本分镜.md（R70 三份产物必须两份同批交付）")
+    return notes["table"]
+
+
+def check_story_storyboard(story_txt, rows, fails, warns):
+    """R70：文本分镜一镜一节、十一字段、逐格覆盖整镜。"""
+    secs = split_blocks(story_txt, RE_STORY_SHOT)
+    if not secs:
+        fails.append("分镜/文本分镜.md 未找到镜节标题（应为「## 镜 1-3 / 6s — 标题」）")
+        return
+    if len(secs) != len(rows):
+        fails.append("文本分镜 %d 节 vs 镜头表 %d 镜，一镜对一镜（R70.5）" % (len(secs), len(rows)))
+    dur_map = {r["id"]: r["dur"] for r in rows}
+    for b in secs:
+        sid = b["m"].group(1)
+        where = "文本分镜 镜 %s" % sid
+        body = b["body"]
+        miss = [k for k in STORY_FIELDS if k not in body]
+        if miss:
+            warns.append("%s 缺字段：%s（十一字段，R70.5）" % (where, "、".join(miss)))
+        cnt = len(RE_CELL_TC.findall(body))
+        d = dur_map.get(sid)
+        if d and cnt < d:
+            warns.append("%s 逐格 %d 格 < %d 秒（一秒一格，R70.4）" % (where, cnt, d))
+        if not any(k in body for k in ("@C", "@S", "@P", "@图片")):
+            warns.append("%s 缺双重绑定（@Cxx／@Sxx／@图片 N，R70）" % where)
+
+
+def check_table_full(rows, shot_frames, warns):
+    """R70：分镜视频取料前的兜底——台词在列6、打斗镜有回合行、表情带几成。"""
+    talk = round_ = expr = 0
+    for r in rows:
+        if not r["audio"].strip() or r["audio"].strip() == "无":
+            talk += 1
+        if "回合" in r["desc"] and "｜" not in r["desc"]:
+            round_ += 1
+        if ("成" in r["desc"]) and not any(k in r["desc"] for k in MUSCLE_KEYS):
+            expr += 1
+    if talk:
+        warns.append("%d 镜列6「Audio & Dialogue Track」是空的：无声也要写音效与静默（R70.3）" % talk)
+    if round_:
+        warns.append("%d 镜写了回合但没有「回合 N｜谁先动｜接触点｜结果」三段行（R61／R70）" % round_)
+    if expr:
+        warns.append("%d 镜写了情绪几成但没写眉／眼／嘴等肌肉（R67／R70）" % expr)
+    return {"talk": talk, "round": round_, "expr": expr}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--project", required=True)
@@ -1616,7 +1760,10 @@ def main():
         return 1
 
     script_p = ep_dir / "剧本.md"
-    board_p = ep_dir / "分镜.md"
+    table_p = ep_dir / "分镜" / "镜头表.md"
+    story_p = ep_dir / "分镜" / "文本分镜.md"
+    table_mode = table_p.is_file()
+    board_p = table_p if table_mode else (ep_dir / "分镜.md")
     seg_p = ep_dir / "分镜视频.md"
     legacy_seg = ep_dir / "分段视频提示词.md"
     seg_is_legacy = False
@@ -1637,13 +1784,19 @@ def main():
     script_txt = read_text(script_p) if script_p.is_file() else ""
     board_txt = read_text(board_p)
     seg_txt = read_text(seg_p)
+    story_txt = read_text(story_p) if story_p.is_file() else ""
+    if table_mode and not story_txt:
+        fails.append("缺文件：分镜/文本分镜.md（R70 三件套必须两份同批）")
     if seg_is_legacy:
         warns.append("本集的分镜视频还叫旧名 `分段视频提示词.md`（R69 起统一叫 `分镜视频.md`）；内容不改也照样查，下一轮交付请换新名")
     asset_txt = read_text(asset_p) if asset_p.is_file() else ""
 
     # ---------- R49 第三视角，人物不看镜头 ----------
     gaze_total = 0
-    for name, txt in (("分镜.md", board_txt), ("分镜视频.md", seg_txt)):
+    board_name = "分镜/镜头表.md" if table_mode else "分镜.md"
+    for name, txt in ((board_name, board_txt), ("分镜视频.md", seg_txt), ("分镜/文本分镜.md", story_txt)):
+        if not txt:
+            continue
         gaze_total += check_camera_gaze(txt, name, fails)
     notes["camera_gaze"] = gaze_total
 
@@ -1681,18 +1834,38 @@ def main():
         if glued:
             fails.append("%s 有标题被挤到上一行末尾（标题粘连），共 %d 处" % (name, glued))
 
-    board_scenes = split_blocks(board_txt, RE_BOARD_SCENE)
-    if not board_scenes:
-        fails.append("分镜.md 未找到场标题（应为「## 第 N 场 ｜ 场名（来源：EPxxx-SCxxx）」）")
-    elif args.skip_script and not script_txt:
-        for blk in board_scenes:
-            head = blk["m"].group(0)
-            if "来源：" not in head:
-                fails.append("跳过了剧本，分镜场标题必须写小说来源：%s" % head.strip()[:40])
+    rows = []
+    if table_mode:
+        board_scenes = []
+        rows = parse_shot_table(board_txt)
+        if not rows:
+            fails.append("分镜/镜头表.md 未找到镜头行（每行应为「| 镜 1-1 / 6s | … |」，六列，R70.2）")
+        warns.append("分镜按 R70 六列镜头表＋文本分镜校验：九栏体与陈述句体只对旧稿生效")
+        check_shot_table(board_txt, rows, story_txt, script_txt, fails, warns, notes)
 
-    shots = split_blocks(board_txt, RE_SHOT)
-    if not shots:
-        fails.append("分镜.md 未找到镜头标题（应为「### 镜头 场-镜 ｜ 中文名」）")
+        class _M(object):
+            def __init__(self, v):
+                self.v = v
+
+            def group(self, i):
+                return self.v
+
+        shots = [{"m": _M(r["id"]), "body": r["desc"]} for r in rows]
+    else:
+        board_scenes = split_blocks(board_txt, RE_BOARD_SCENE)
+        if not board_scenes:
+            fails.append("分镜.md 未找到场标题（应为「## 第 N 场 ｜ 场名（来源：EPxxx-SCxxx）」）")
+        elif args.skip_script and not script_txt:
+            for blk in board_scenes:
+                head = blk["m"].group(0)
+                if "来源：" not in head:
+                    fails.append("跳过了剧本，分镜场标题必须写小说来源：%s" % head.strip()[:40])
+        if story_txt:
+            warns.append("有 分镜/文本分镜.md 但没找到 分镜/镜头表.md：R70 要求两份同批，请补镜头表")
+
+        shots = split_blocks(board_txt, RE_SHOT)
+        if not shots:
+            fails.append("分镜.md 未找到镜头标题（应为「### 镜头 场-镜 ｜ 中文名」）")
 
     # ---------- 资产表、编号与站位锚点（R26–R27） ----------
     legacy = (not asset_p.is_file()) and ("场景站位" not in script_txt)
@@ -1755,74 +1928,100 @@ def main():
     shot_durs = {}
     stray = []
     shot_frames = []
-    for s in shots:
-        sid = s["m"].group(1)
-        where = "镜头 %s" % sid
-        head = s["m"].group(2) or ""
-        raw = field_lines(s["body"])
-        prose = (not raw.get("拍摄手法")) and ("毫米" in s["body"] or "机位" in s["body"])
-        if prose:
-            notes["prose"] = notes.get("prose", 0) + 1
-            f = prose_fields(s["body"], head)
-            pr = f["提示词"]
-            check_prose(s["body"], head, where, warns)
-            pr = ""  # 陈述句体正文即提示词，不再额外校验
-        else:
-            notes["legacy"] = notes.get("legacy", 0) + 1
-            f = raw
-            for name in SHOT_FIELDS:
-                if name not in f:
-                    fails.append("%s 缺「%s」栏" % (where, name))
-            pr = prompt_text(f)
-        shot_frames.append({"id": sid, "f": f, "pr": f.get("提示词", ""), "prose": prose})
-        board_prompt_all.append(f.get("提示词", ""))
-        shot_pr_pairs.append((where, f.get("提示词", "")))
-        if not prose:
-            check_prompt_detail(pr, where, fails)
-            check_no_timecode(pr, where, fails)
-        dur = shot_duration(f) if not prose else prose_duration(head, s["body"])
-        shot_durs[sid] = dur
-        if dur and dur > 15:
-            warns.append("%s 单镜 %d 秒，超过 H3 单次上限，须并进容器或拆镜" % (where, dur))
-        if dur == 1:
-            warns.append("%s 单镜只有 1 秒，低于 2 秒不宜单条送生成" % where)
-        check_slots(f.get("参考图", "") + "\n" + pr, where, fails, notes)
-        allow_music = "用户指定" in f.get("声音", "")
-        scan_music(pr, where + " 提示词", fails, require_off=False, allow=allow_music)
-        scan_music(f.get("声音", ""), where + " 声音栏", fails, require_off=False, allow=allow_music)
-        # 台词栏只做索引
-        tl = f.get("台词", "").strip()
-        if tl and tl != "无":
-            if re.search(r"[\u4e00-\u9fa5]{6,}", tl):
-                fails.append("%s「台词」栏抄了原文，只该写说话顺序与说话人" % where)
-            if not re.search(r"[①②③④⑤⑥⑦⑧⑨]", tl):
-                fails.append("%s「台词」栏缺说话顺序（格式 ① 周野 → ② 小赵）" % where)
-        check_line_order(tl, where, "台词", fails)
-        # R14／R23：台词原文只写在「提示词」里；抄进「声音」「台词」栏就是复述，汇总告警
-        for _, dtxt in dialogue:
-            if len(dtxt) < 2:
-                continue
-            for col in ("台词", "声音"):
-                if dtxt in f.get(col, ""):
-                    stray.append("%s「%s」栏" % (where, col))
-                    break
+    if table_mode:
+        for r in rows:
+            where = "镜 %s" % r["id"]
+            f = {
+                "拍摄手法": r["desc"],
+                "动作": r["desc"],
+                "动作先后": r["desc"],
+                "表情": r["desc"],
+                "自然规律": r["anchors"] + "\n" + r["desc"],
+                "声音": r["audio"],
+                "台词": r["audio"],
+                "参考图": r["anchors"],
+                "提示词": r["desc"],
+            }
+            shot_frames.append({"id": r["id"], "f": f, "pr": r["desc"], "prose": False, "table": True})
+            board_prompt_all.append(r["desc"] + "\n" + r["audio"])
+            shot_pr_pairs.append((where, r["desc"]))
+            shot_durs[r["id"]] = r["dur"]
+            check_slots(r["anchors"] + "\n" + r["desc"], where, fails, notes)
+            scan_music(r["desc"] + "\n" + r["audio"], where + " 列5／列6", fails, require_off=False)
+    else:
+        board_prompt_all = []
+        shot_pr_pairs = []
+        shot_durs = {}
+        stray = []
+        shot_frames = []
+        for s in shots:
+            sid = s["m"].group(1)
+            where = "镜头 %s" % sid
+            head = s["m"].group(2) or ""
+            raw = field_lines(s["body"])
+            prose = (not raw.get("拍摄手法")) and ("毫米" in s["body"] or "机位" in s["body"])
+            if prose:
+                notes["prose"] = notes.get("prose", 0) + 1
+                f = prose_fields(s["body"], head)
+                pr = f["提示词"]
+                check_prose(s["body"], head, where, warns)
+                pr = ""  # 陈述句体正文即提示词，不再额外校验
             else:
-                continue
-            break
-        # 独白
-        sound = f.get("声音", "")
-        is_mono = any(w in sound for w in MONO_WORDS)
-        if is_mono:
-            if "不张嘴" not in pr:
-                fails.append("%s 是独白镜，提示词里没写「不张嘴」" % where)
-            exp = f.get("表情", "")
-            bad = [w for w in MOUTH_CONFLICT if w in exp]
-            if bad:
-                fails.append("%s 独白镜「表情」栏出现冲突描写：%s" % (where, "、".join(bad)))
-        # 动作里不用冒号
-        act = f.get("动作", "")
-        if "：" in act or ":" in act:
-            fails.append("%s「动作」栏用了冒号，会被当成台词行；改用逗号" % where)
+                notes["legacy"] = notes.get("legacy", 0) + 1
+                f = raw
+                for name in SHOT_FIELDS:
+                    if name not in f:
+                        fails.append("%s 缺「%s」栏" % (where, name))
+                pr = prompt_text(f)
+            shot_frames.append({"id": sid, "f": f, "pr": f.get("提示词", ""), "prose": prose})
+            board_prompt_all.append(f.get("提示词", ""))
+            shot_pr_pairs.append((where, f.get("提示词", "")))
+            if not prose:
+                check_prompt_detail(pr, where, fails)
+                check_no_timecode(pr, where, fails)
+            dur = shot_duration(f) if not prose else prose_duration(head, s["body"])
+            shot_durs[sid] = dur
+            if dur and dur > 15:
+                warns.append("%s 单镜 %d 秒，超过 H3 单次上限，须并进容器或拆镜" % (where, dur))
+            if dur == 1:
+                warns.append("%s 单镜只有 1 秒，低于 2 秒不宜单条送生成" % where)
+            check_slots(f.get("参考图", "") + "\n" + pr, where, fails, notes)
+            allow_music = "用户指定" in f.get("声音", "")
+            scan_music(pr, where + " 提示词", fails, require_off=False, allow=allow_music)
+            scan_music(f.get("声音", ""), where + " 声音栏", fails, require_off=False, allow=allow_music)
+            # 台词栏只做索引
+            tl = f.get("台词", "").strip()
+            if tl and tl != "无":
+                if re.search(r"[\u4e00-\u9fa5]{6,}", tl):
+                    fails.append("%s「台词」栏抄了原文，只该写说话顺序与说话人" % where)
+                if not re.search(r"[①②③④⑤⑥⑦⑧⑨]", tl):
+                    fails.append("%s「台词」栏缺说话顺序（格式 ① 周野 → ② 小赵）" % where)
+            check_line_order(tl, where, "台词", fails)
+            # R14／R23：台词原文只写在「提示词」里；抄进「声音」「台词」栏就是复述，汇总告警
+            for _, dtxt in dialogue:
+                if len(dtxt) < 2:
+                    continue
+                for col in ("台词", "声音"):
+                    if dtxt in f.get(col, ""):
+                        stray.append("%s「%s」栏" % (where, col))
+                        break
+                else:
+                    continue
+                break
+            # 独白
+            sound = f.get("声音", "")
+            is_mono = any(w in sound for w in MONO_WORDS)
+            if is_mono:
+                if "不张嘴" not in pr:
+                    fails.append("%s 是独白镜，提示词里没写「不张嘴」" % where)
+                exp = f.get("表情", "")
+                bad = [w for w in MOUTH_CONFLICT if w in exp]
+                if bad:
+                    fails.append("%s 独白镜「表情」栏出现冲突描写：%s" % (where, "、".join(bad)))
+            # 动作里不用冒号
+            act = f.get("动作", "")
+            if "：" in act or ":" in act:
+                fails.append("%s「动作」栏用了冒号，会被当成台词行；改用逗号" % where)
 
     if stray:
         warns.append("%d 处把台词原文抄进了「声音」／「台词」栏（台词原文只该写在「提示词」，R14 台词只说一遍）；例：%s"
@@ -1881,7 +2080,10 @@ def main():
     notes["transcode"] = check_transcode(shot_frames, segs, warns)
 
     # ---------- 分镜全信息稿（R67） ----------
-    notes["boardfull"] = check_board_full(board_txt, shot_frames, warns)
+    if table_mode:
+        notes["boardfull"] = check_table_full(rows, shot_frames, warns)
+    else:
+        notes["boardfull"] = check_board_full(board_txt, shot_frames, warns)
 
     # ---------- 转场（R57） ----------
     allow_trans = args.allow_transition or ("用户指定转场" in script_txt) or ("转场（用户指定" in board_txt) or ("转场（用户指定" in seg_txt)
@@ -1916,7 +2118,7 @@ def main():
             fails.append("一集总时长 %d 秒，不在 4 分钟口径（220–260 秒，目标 240 秒）：少了补戏或并段，多了删并（R37）"
                          % seg_total)
 
-    if scenes:
+    if scenes and not table_mode:
         covered = {sc for sc in scenes if sc in board_txt}
         missing = [sc for sc in scenes if sc not in covered]
         waived = "未拍场次" in board_txt
@@ -2009,6 +2211,10 @@ def report(fails, warns, notes, info, _unused, segs):
             o = notes["oneshot"]
             tail = "（旧格式多镜打包，按不回溯未判错）" if o["legacy"] else ""
             print("R63 分段＝镜数 %d／段数 %d%s" % (o["shots"], o["segs"], tail))
+        if notes.get("table"):
+            tb = notes["table"]
+            print("R70 镜头表：%d 镜／连续三镜窗口 %d 个／钩子越界 %d／逐秒不足 %d 镜"
+                  % (tb["rows"], tb["windows"], tb["bad_hook"], tb["short"]))
         if notes.get("prose"):
             print("R68 陈述句体：%d 镜（另 %d 镜仍用九栏体，旧稿不回溯）"
                   % (notes["prose"], notes.get("legacy", 0)))
