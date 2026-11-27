@@ -1354,6 +1354,82 @@ def check_seam(seg_detail_pairs, fails, warns):
     return pairs
 
 
+SHOT_SIZE_MAP = [
+    ("大特写", ("extreme close-up", "extreme close up")),
+    ("中近景", ("medium close-up", "medium close up", "medium close")),
+    ("中全景", ("medium wide", "medium-full", "medium full")),
+    ("特写", ("close-up", "close up")),
+    ("近景", ("close shot", "close-up", "close up")),
+    ("中景", ("medium shot", "medium")),
+    ("全景", ("wide shot", "wide", "full shot")),
+    ("远景", ("extreme wide", "long shot", "establishing shot")),
+]
+ANGLE_MAP = [
+    ("略仰", "low angle"), ("仰", "low angle"),
+    ("略俯", "high angle"), ("俯", "high angle"),
+]
+NUM_WORD = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+            "eleven", "twelve"]
+REASON_WORDS = ("because", "so that", "in order to", "the reason is")
+
+
+def check_transcode(shot_frames, segs, warns):
+    """R66：分段是把分镜译成 H3 语言，不重写。逐镜配对查九栏是否译到（只提醒，旧稿不回溯）。"""
+    if not shot_frames or not segs or len(shot_frames) != len(segs):
+        return {"pairs": 0, "bad": 0}
+    pairs, bad = 0, 0
+    for idx, (sf, g) in enumerate(zip(shot_frames, segs)):
+        num = g["m"].group(1)
+        where = "第 %s 段（对镜头 %s）" % (num, sf["id"])
+        detail = _seg_sections(g["body"]).get("detailed_description", "")
+        cam = sf["f"].get("拍摄手法", "")
+        size = None
+        for zh, tokens in SHOT_SIZE_MAP:
+            if zh in cam:
+                size = (zh, tokens)
+                break
+        if size and not any(t in detail.lower() for t in size[1]):
+            warns.append("%s 分镜景别是「%s」，分段 Shot 句没译出对应英文景别（R66）" % (where, size[0]))
+            bad += 1
+        ang = None
+        for zh, en in ANGLE_MAP:
+            if zh in cam:
+                ang = (zh, en)
+                break
+        if ang and ang[1] not in detail.lower():
+            warns.append("%s 分镜机位是「%s」，分段没写 %s（R66）" % (where, ang[0], ang[1]))
+            bad += 1
+        m = re.search(r"([0-9]+|[一二三四五六七八九十])\s*成", sf["f"].get("表情", ""))
+        if m:
+            raw = m.group(1)
+            cn = "零一二三四五六七八九十"
+            n = cn.index(raw) if raw in cn and raw != "十" else None
+            if n is None and raw.isdigit():
+                n = int(raw)
+            if n is not None:
+                ok = ("%s parts" % NUM_WORD[n] in detail.lower()
+                      or "%d parts" % n in detail.lower()
+                      or "%d percent" % (n * 10) in detail.lower()
+                      or "%d0 percent" % n in detail.lower())
+                if not ok:
+                    warns.append("%s 分镜表情是「%s成」，分段英文表情句没带几成（R66）" % (where, raw))
+                    bad += 1
+        beats = len(re.findall(r"[①②③④⑤⑥⑦⑧⑨⑩]", sf["f"].get("动作先后", "")))
+        if beats >= 3:
+            units = len([x for x in re.split(r"[,;]", detail) if x.strip()])
+            if units < beats:
+                warns.append("%s 分镜「动作先后」%d 拍，分段动作分句只有 %d 段，可能把拍数并掉了（R66）"
+                             % (where, beats, units))
+                bad += 1
+        low = detail.lower()
+        if any(w in low for w in REASON_WORDS):
+            warns.append("%s 分段里出现「because／so that／in order to」这类制作说明，分镜的解释句不该译进提示词（R66）"
+                         % where)
+            bad += 1
+        pairs += 1
+    return {"pairs": pairs, "bad": bad}
+
+
 def check_one_shot(shots, segs, shot_durs, fails):
     """R63：一镜一段。段数=镜数、一段只有一个 [Shot 1]、段时长=对应镜镜长。
     旧格式（段内仍写 At MM:SS.mmm 的打包稿）按不回溯原则只提示、不判错。"""
@@ -1540,6 +1616,7 @@ def main():
     shot_pr_pairs = []
     shot_durs = {}
     stray = []
+    shot_frames = []
     for s in shots:
         sid = s["m"].group(1)
         where = "镜头 %s" % sid
@@ -1548,6 +1625,7 @@ def main():
             if name not in f:
                 fails.append("%s 缺「%s」栏" % (where, name))
         pr = prompt_text(f)
+        shot_frames.append({"id": sid, "f": f, "pr": pr})
         board_prompt_all.append(pr)
         shot_pr_pairs.append((where, pr))
         check_prompt_detail(pr, where, fails)
@@ -1649,6 +1727,9 @@ def main():
     # ---------- 一镜一段（R63） ----------
     notes["oneshot"] = check_one_shot(shots, segs, shot_durs, fails)
 
+    # ---------- 译写对账（R66） ----------
+    notes["transcode"] = check_transcode(shot_frames, segs, warns)
+
     # ---------- 转场（R57） ----------
     allow_trans = args.allow_transition or ("用户指定转场" in script_txt) or ("转场（用户指定" in board_txt) or ("转场（用户指定" in seg_txt)
     check_transitions(shot_pr_pairs, seg_detail_pairs, allow_trans, fails, warns)
@@ -1741,6 +1822,7 @@ HUMAN = [
     "对话与表情（R62）：台词是不是一句一人、每 1–4 句之间有一句身体准备；表情两层（情绪＋几成＋对着谁／眉·眼·鼻·嘴·颈·手）是否齐；正反打有没有连切超过 3 次、听者反应镜有没有抢戏；说话人与听者的口型是否分开写、独白镜是否唇齿闭合；`overall_soundscape` 是否写了嗓音质感而不是台词（R62）",
     "参考画风（R64）：三份资产头两行是不是「参考画风：REF-…（参考，不照搬）」＋「本剧形象：…」；每条提示词是否先写本剧形象（身份／年龄／体型／发型发色／服装款式与磨损／伤势／随身物；场景写剧情要求的布局与时代痕迹；道具写剧情要求的形状尺寸材质磨损），再写参考画风只取质感／配色／材质／打光；有没有照搬参考图里的人脸长相、姿态、构图、服装款式、建筑与道具种类；参考图与剧情冲突时是不是以剧情为准",
     "逐件确认（R65）：这一轮是不是只交了一件（分段那轮是「分段＋交接」两件同批）；剧本→人物资产→场景道具→分镜→分段＋交接，每道门是否都等到了用户明确的「可以／继续」；有没有在用户没点头时顺手做下一件、或在交付时预告了下一件内容。",
+    "译写对账（R66）：把分镜第 N 镜的九栏与第 N 段并排读——景别／机位高度／角度／轴线／运动是否都译进 [Shot 1] 与「场景与轴线」（50mm、1.5 米、约七十度斜角、固定加一次极轻推近要读得出来）；动作是否照原句的关节承重位移写、没被替换成别的动作；「动作先后」几拍就几组动作分句；「表情」的几成与眉／眼／瞳孔／鼻／咬肌／唇／喉／肩颈／手是否逐项落进英文表情句；自然规律的光位、投影、雾、白气、水痕是否进了 Shot 句；声音是否只进 overall_soundscape 与嗓音提示、没抄台词；台词是否逐字进 (Sx) 块；参考图是否只进元数据与图槽、正文写中文名；起幅与「承接」「转场出」是否各自变成 Shot 句开头、Entry、Exit。有没有多出分镜没有的动作／台词／道具／镜头，有没有把「理由」「为了让……」译进正文，有没有改景别机位，有没有两镜并一段。",
 ]
 
 
@@ -1772,6 +1854,9 @@ def report(fails, warns, notes, info, _unused, segs):
             o = notes["oneshot"]
             tail = "（旧格式多镜打包，按不回溯未判错）" if o["legacy"] else ""
             print("R63 分段＝镜数 %d／段数 %d%s" % (o["shots"], o["segs"], tail))
+        if notes.get("transcode") and notes["transcode"]["pairs"]:
+            t = notes["transcode"]
+            print("R66 译写对账 %d 段：%d 处对不上（明细见 WARN）" % (t["pairs"], t["bad"]))
         if notes["slots"]:
             print("用到的参考图槽：@图片 %s" % "、".join(str(x) for x in sorted(notes["slots"])))
             mx = max(notes["slots"])
