@@ -37,6 +37,7 @@ MD_ESC = re.compile(r"\\([_<>\[\]])")
 TIME_CODE_RE = re.compile(r"(?<!\d)(\d{1,2}):(\d{2})(?!\d)")
 RE_ENTRY = re.compile(r"^[ \t]{0,8}Entry[：:]\s", re.M)
 RE_EXIT = re.compile(r"^[ \t]{0,8}Exit[：:]\s", re.M)
+RE_SEG_HEAD = re.compile(r"镜\s*(\d+-\d+)\s*/\s*(\d+)\s*s")
 # R57：转场六选一；黑场／闪白／叠化／淡入淡出默认禁用
 TRANSITION_WORDS = ("同向运镜", "动作匹配", "遮挡", "出入画", "光影过渡", "硬切",
                     "push-in", "pull-out", "push in", "pull out", "pan", "tracking",
@@ -128,129 +129,100 @@ def _seg_sections(body):
 
 
 def check_segment_sections(body, where, fails, warns):
-    """R20：官方 Ref2VA 六段字段齐全、顺序固定、六段前无约束段；detailed_description 不成分镜缩写（R51）。"""
+    """R71：Ref2VA 六段齐全、顺序固定、六段前无约束段；标签判定与字数只提醒。"""
     body = _norm_md(body)
     sec = _seg_sections(body)
     hits = list(RE_SEG_SECTION.finditer(body))
     if not hits:
-        fails.append("%s 没有官方六段字段行（应为 subject_definitions: 这种写法，不用 ###，R20）" % where)
+        fails.append("%s 没有六段字段行（应为 subject_definitions: 这种写法，不用 ###，R71.3）" % where)
         return sec
     first_pos = hits[0].start()
     prefix = body[:first_pos]
     if "约束" in prefix:
-        fails.append("%s 六段前加了中文约束段；官方六段前不许加额外段（R20／R52）" % where)
+        fails.append("%s 六段前加了中文约束段；官方六段前不许加额外段（R71.3）" % where)
     if re.search(r"^###\s*[a-z_]+\s*$", body, re.M):
-        fails.append("%s 六段用了 ### 标题；官方要求字段行 subject_definitions: 这种写法（R20）" % where)
+        fails.append("%s 六段用了 ### 标题；官方要求字段行 subject_definitions: 这种写法（R71.3）" % where)
     order = [h.group(1) for h in hits if h.group(1) in SEG_SECTIONS]
     if order[:len(SEG_SECTIONS)] != SEG_SECTIONS:
-        fails.append("%s 六段顺序不对：当前 %s；应为 %s（R20）"
+        fails.append("%s 六段顺序不对：当前 %s；应为 %s（R71.3）"
                      % (where, " / ".join(order) or "无", " / ".join(SEG_SECTIONS)))
     missing = [x for x in SEG_SECTIONS if x not in sec]
     if missing:
-        fails.append("%s 缺六段：%s（R20 六段缺一不可）"
+        fails.append("%s 缺六段：%s（R71.3 六段缺一不可）"
                      % (where, "、".join(x + ":" for x in missing)))
         return sec
+    extra = [x for x in order if x not in SEG_SECTIONS]
+    if extra:
+        warns.append("%s 六段之外还有 %s；分镜视频只要六段（R71.3）" % (where, "、".join(extra)))
 
     detail = sec["detailed_description"]
     if not RE_SHOT_TAG.search(detail):
-        fails.append("%s detailed_description 缺 [Shot N] 镜头编号（R20）" % where)
+        fails.append("%s detailed_description 缺 [Shot N]（R71.7）" % where)
     if not any(BODY_RE.search(l) or BODY_RE_EN.search(l) for l in detail.splitlines()):
         fails.append("%s detailed_description 没有任何表情肌／身体／视线细节（R51 不是分镜缩写）" % where)
+    head = detail.split("[Shot 1]")[0]
+    if not re.search(r"[A-Za-z]{3,}", head):
+        warns.append("%s [Shot 1] 之前没有风格句（1–2 句质感描述，R71.6）" % where)
 
     subj_def = sec["subject_definitions"]
-    subj_nums = set(re.findall(r"<Subject\s+(\d+)>", subj_def))
-    subj_names = {m.group(1): m.group(2).strip() for m in RE_SUBJECT_NAME.finditer(subj_def)}
-    missing_name = [num for num in sorted(subj_nums) if num not in subj_names]
-    if missing_name:
-        fails.append("%s 这些主体定义没写「（图片名：中文名）」：%s（R20.3）"
-                     % (where, "、".join("<Subject %s>" % n for n in missing_name)))
-    pic_nums = set(re.findall(r"<Picture\s+(\d+)>", subj_def))
-    pic_names = {m.group(1): m.group(2).strip() for m in RE_PICTURE_NAME.finditer(subj_def)}
-    missing_pic = [num for num in sorted(pic_nums) if num not in pic_names]
-    if missing_pic:
-        fails.append("%s 这些帧/构图定义没写「（图片名：中文名）」：%s（R20.3）"
-                     % (where, "、".join("<Picture %s>" % n for n in missing_pic)))
-    for num in sorted(pic_nums):
-        name = pic_names.get(num)
-        if name and name not in detail:
-            fails.append("%s 定义了 <Picture %s>（图片名：%s），但 detailed_description 没用这个名字（R20.3）"
-                         % (where, num, name))
-    if RE_SUBJECT.findall(detail) or RE_PICTURE.findall(detail):
-        fails.append("%s 正文仍有裸 <Subject N>／<Picture N>；六段正文一律写图片中文名（R20.3）" % where)
-    for num in sorted(subj_nums):
-        name = subj_names.get(num)
-        if name and name not in detail:
-            fails.append("%s 定义了 <Subject %s>（图片名：%s），但 detailed_description 没用这个名字（R20.3）"
-                         % (where, num, name))
-
     for line in subj_def.splitlines():
         st = line.strip()
-        if not re.match(r"<Subject\s+\d+>", st):
+        if not st.startswith("<Subject"):
             continue
-        if "no visual reference" in st.lower():
-            continue
-        if "The reference supplies" not in st or "only;" not in st:
-            fails.append("%s 主体定义缺「参考图只提供身份」限定句（R54）：%s" % (where, st[:60]))
-        if "pose, head angle and eyeline follow the shot description" not in st \
-                and "camera angle and view direction follow the shot description" not in st:
-            fails.append("%s 主体定义缺「姿态/朝向/视线以分镜为准」限定句（R54）：%s" % (where, st[:60]))
-        if "main orientation" not in st.lower():
-            fails.append("%s 主体定义缺本段主朝向预声明（R54）：%s" % (where, st[:60]))
-
-    # <Picture N> 只允许当首帧/尾帧/关键帧/构图锚点/故事板；人物三视图、场景图只作主体来源
+        if not re.search(r"[A-Za-z]{4,}", st):
+            warns.append("%s 主体定义不是英文句（建议 `<Subject N> is 中文名 (Cxx), …`，R71.2）：%s" % (where, st[:50]))
     for line in subj_def.splitlines():
         st = line.strip()
         if re.match(r"<Picture\s+\d+>\s*[:：]", st):
             if not re.search(r"(first frame|last frame|tail frame|key frame|keyframe|storyboard|composition anchor|start frame|end frame|首帧|尾帧|关键帧|构图锚点|故事板)", st, re.I):
-                fails.append("%s 单独定义了 <Picture N>，但没写它作为首帧/尾帧/关键帧/构图锚点/故事板；人物/场景/道具参考图应折进 <Subject N>（R20）" % where)
+                fails.append("%s 单独定义了 <Picture N>，但没写它作为首帧/尾帧/关键帧/构图锚点；人物、场景参考图应折进 <Subject N>（R71.2）" % where)
+    if RE_SUBJECT.findall(detail) or RE_PICTURE.findall(detail):
+        warns.append("%s 正文里还有裸 <Subject N>／<Picture N>；建议写成名字或「the man in …」（R71.2）" % where)
 
     summary = sec["summary"].strip()
     m = re.match(r"\[([^\]]+)\]", summary)
     if not m:
-        fails.append("%s summary 没有以方括号任务类型开头，例如 [reference generation]（R20）" % where)
+        fails.append("%s summary 没有以方括号任务类型开头，例如 [reference generation]（R71.3）" % where)
     else:
         tasks = [t.strip() for t in re.split(r"\+|,", m.group(1)) if t.strip()]
         bad = [t for t in tasks if t not in SEG_TASK_TYPES]
         if bad:
-            fails.append("%s summary 任务类型不在官方六类：%s（R20）" % (where, "、".join(bad)))
+            fails.append("%s summary 任务类型不在官方六类：%s（R71.3）" % (where, "、".join(bad)))
         if "video continuation" in tasks and "<Video" not in body:
-            warns.append("%s summary 写了 video continuation，但本段没有 <Video N>；没有把上一段视频当输入时不许写（R20）" % where)
+            warns.append("%s summary 写了 video continuation，但本段没有 <Video N>（R71.3）" % where)
 
     ret = sec["retention_analysis"].strip()
     if not ret:
-        fails.append("%s retention_analysis 为空（R20）" % where)
+        fails.append("%s retention_analysis 为空（R71.5）" % where)
     else:
         bad = 0
         for line in ret.splitlines():
             st = line.strip()
             if not st:
                 continue
-            if st.startswith("<") and not any(k in st for k in VIS_MARKERS + AUD_MARKERS):
+            if not any(k in st for k in VIS_MARKERS + AUD_MARKERS):
                 bad += 1
                 if bad <= 3:
-                    fails.append("%s retention_analysis 缺合法保留度标记：%s（R20）" % (where, st[:60]))
+                    fails.append("%s retention_analysis 缺保留度标记（四档之一，R71.5）：%s" % (where, st[:60]))
             if st.startswith("<Subject"):
-                if not re.match(r"<Subject\s+\d+>\s*[（(]\s*图片名[：:]", st):
-                    fails.append("%s retention_analysis 主体条目不是以 <Subject N>（图片名：…） 开头（R54）：%s" % (where, st[:60]))
-                if "head angle and eyeline are reblocked" not in st.lower() \
-                        or "reference frontal orientation is not preserved" not in st.lower():
-                    fails.append("%s retention_analysis 主体条目缺朝向重排声明（R54）：%s" % (where, st[:60]))
-                if "partially_preserved" in st or "attribute_transfer" in st:
-                    fails.append("%s retention_analysis 用了 R54 不允许的档位；只许 fully_preserved／weak_reference：%s" % (where, st[:60]))
-            elif any(k in st for k in VIS_MARKERS) and "appears" in st:
-                fails.append("%s retention_analysis 主体条目没有以 <Subject N>（图片名：…） 开头（R54）：%s" % (where, st[:60]))
+                if not re.search(r"appears in", st):
+                    warns.append("%s retention_analysis 主体条目没写 `(appears in [Shot 1])`（R71.5）：%s" % (where, st[:60]))
+            if "(S" in st:
+                fails.append("%s retention_analysis 里出现 (Sx)；这一段不许写台词编号（R71.5）：%s" % (where, st[:60]))
+            if st.startswith("<Video") and "fully_copy" in st:
+                fails.append("%s 不给 <Video N> 标 fully_copy（R71.5）" % where)
         if bad > 3:
-            fails.append("%s retention_analysis 另有 %d 条缺合法标记（R20）" % (where, bad - 3))
+            fails.append("%s retention_analysis 另有 %d 条缺合法标记（R71.5）" % (where, bad - 3))
 
     words = len(re.findall(r"[A-Za-z]+", detail))
-    if words and not (150 <= words <= 350):
-        warns.append("%s detailed_description 约 %d 个英文词，模板密度为 150–350（台词密集段按发声时间排满，R56）" % (where, words))
+    if words and not (350 <= words <= 500):
+        warns.append("%s detailed_description 约 %d 个英文词，R71.6 口径为 350–500（对白密集段按发声时间排满）" % (where, words))
 
     sound = sec["overall_soundscape"].strip()
     if not sound:
-        fails.append("%s overall_soundscape 为空；环境声、动作声、非语言人声 1–4 句（R20）" % where)
+        fails.append("%s overall_soundscape 为空；环境声、动作声、非语言人声 1–4 句（R71.3）" % where)
     elif sound == "N/A" and "静音" not in body:
-        warns.append("%s overall_soundscape 写了 N/A；只有用户明确要求全片静音才可写（R20）" % where)
+        warns.append("%s overall_soundscape 写了 N/A；只有用户明确要求全片静音才可写（R71.3）" % where)
     return sec
 
 
@@ -295,68 +267,41 @@ def check_official_timecodes(detail, declared, where, fails):
 
 
 def check_segment_dialogue(sec, where, fails, warns=None):
-    """R56：台词块后置、每句 `(Sx) 角色：[Chinese] 原文`；不用 <d>、不写 says；说话人按行递增。"""
+    """R71.4：台词进 <d>[Chinese] 原文</d>，逐字一句一处；旧 `(Sx) 角色：[Chinese] 原文` 块作废。"""
     detail = _norm_md(sec.get("detailed_description", ""))
     if not detail:
         return
-    names = [m.group(2).strip() for m in RE_SUBJECT_NAME.finditer(_norm_md(sec.get("subject_definitions", "")))]
-    if RE_DIALOG_TAG.search(detail) or "<d>" in detail:
-        fails.append("%s detailed_description 仍用 <d> 包台词；R56 模板要求 (Sx) 角色：[Chinese] 原文（不用 <d>）" % where)
-    if re.search(r"\bsays\b", detail, re.I):
-        fails.append("%s detailed_description 出现 says；R56 模板不写 says，台词只写 (Sx) 角色：[Chinese] 原文" % where)
-
-    lines = list(RE_SEG_DIALOGUE.finditer(detail))
-    if not lines:
-        if warns is not None:
-            warns.append("%s detailed_description 没有 (Sx) 台词行；若本段剧本有人说话，必须按 (Sx) 角色：[Chinese] 原文 补台词块（R56）" % where)
+    tags = re.findall(r"<d>(.*?)</d>", detail, re.S)
+    opens, closes = detail.count("<d>"), detail.count("</d>")
+    if opens != closes:
+        fails.append("%s <d> 标签没有闭合（R71.4）" % where)
+    for t in tags:
+        st = t.strip()
+        if not st:
+            fails.append("%s <d> 里是空台词（R71.4）" % where)
+            continue
+        m = re.match(r"\[([^\]]+)\]", st)
+        if not m:
+            fails.append("%s <d> 缺语言标签，应为 `<d>[Chinese] 原文</d>`（R71.4）" % where)
+            continue
+        if not st[m.end():].strip():
+            fails.append("%s <d> 只有语言标签没有原文（R71.4）" % where)
+    for name in ("summary", "retention_analysis", "overall_soundscape"):
+        if "<d>" in sec.get(name, "") or "[Chinese]" in sec.get(name, ""):
+            fails.append("%s %s 抄了台词；台词只写在 detailed_description 的 <d> 里（R71.4）" % (where, name))
+    if RE_SEG_DIALOGUE.search(detail):
+        warns.append("%s 还在用旧的 `(Sx) 角色：[Chinese] 原文` 台词块；R71.4 改成 <d>[Chinese] 原文</d>，身份与 (Sx) 写在 <d> 外" % where)
+    if not tags:
+        if warns is not None and not RE_SEG_DIALOGUE.search(detail):
+            warns.append("%s 没有 <d> 台词；若本镜有人说话，必须写 `<d>[Chinese] 原文</d>`（R71.4）" % where)
         return
-
-    last_shot = max((m.start() for m in RE_SHOT_TAG.finditer(detail)), default=-1)
-    if lines[0].start() < last_shot:
-        fails.append("%s 台词出现在镜头块之前；R56 要求所有台词集中在全部镜头之后（R56.9）" % where)
-
-    # 说话人 ID 按台词行顺序递增；同一角色多句各占一号（样本口径）
-    seq_bad = False
-    for i, m in enumerate(lines, 1):
-        sid = m.group(1)
-        if "," in sid:
-            continue
-        try:
-            num = int(sid[1:])
-        except ValueError:
-            seq_bad = True
+    if len(tags) >= 2 and "only the character who is speaking moves their lips" not in detail.lower():
+        warns.append("%s 多人对话，正文没写「Only the character who is speaking moves their lips; the rest keep lips closed.」（R34／R62）" % where)
+    clean = re.sub(r"<d>.*?</d>", "", detail, flags=re.S)
+    for line in clean.splitlines():
+        if len(CJK.findall(line)) >= 6:
+            warns.append("%s 台词之外的叙述句出现中文（正文建议英文，专名可留中文，R53）：%s" % (where, line.strip()[:40]))
             break
-        if num != i:
-            seq_bad = True
-            break
-    if seq_bad:
-        fails.append("%s 台词行 (Sx) 没有按行从 (S1) 递增；同一角色多句也逐句各占一号（R56.9）" % where)
-
-    for m in lines:
-        role = re.sub(r"[（(]\s*VO\s*不张嘴\s*[）)]", "", m.group(2)).strip()
-        if names and role not in names and not any(n and n in role for n in names):
-            fails.append("%s 台词行说话人「%s」不在本段 Subject 图片中文名里（R20.3／R56）：%s" % (where, role, m.group(0).strip()[:50]))
-
-    if len(lines) >= 2 and "only the character who is speaking moves their lips" not in detail.lower():
-        fails.append("%s 多人对话，detailed_description 没写「Only the character who is speaking moves their lips…」（R34 一人说时别人嘴不动）" % where)
-
-    for line in detail.splitlines():
-        if RE_SEG_DIALOGUE.match(line):
-            continue
-        if RE_ENTRY.match(line) or RE_EXIT.match(line):
-            continue
-        if re.match(r"^[ \t]{0,8}Transition\s+(?:out|in)[:：]", line, re.I):
-            continue
-        clean = line
-        for name in names:
-            clean = clean.replace(name, "")
-        if len(CJK.findall(clean)) >= 6:
-            fails.append("%s detailed_description 叙述句出现中文（除台词、画内可见引文与图片中文名外正文应为英文，R53）：%s"
-                         % (where, line.strip()[:40]))
-            break
-
-
-
 
 
 def check_segment_music(sec, where, fails):
@@ -373,22 +318,13 @@ def check_segment_music(sec, where, fails):
 
 
 def check_segment_gaze(sec, where, fails):
-    """R52/R54：风格句必须同时写「镜头是旁观者、人物不看镜头」与「不复制参考图正面取向」。"""
+    """R52／R71.9：不再要求 outside witness 固定长句；只提醒 eyeline 落点与瞳孔离轴。"""
+    warn_bucket = []
     detail = sec.get("detailed_description", "")
     low = detail.lower()
-    has_lens_ban = "no subject looks into the lens" in low or "no character looks into the lens" in low
-    has_frontal_ban = "no subject adopts the frontal gaze of the reference sheets" in low
-    has_side_view = "profile or three-quarter view" in low
-    if "outside witness" not in low or not has_lens_ban:
-        fails.append("%s detailed_description 缺英文不看镜头硬句（outside witness / no subject looks into the lens，R52／R54）" % where)
-        return 1
-    if not has_frontal_ban or not has_side_view:
-        fails.append("%s detailed_description 缺「不复制参考图正面取向 + 侧脸/三分之二侧」硬句（R54）" % where)
-        return 1
-    if "pupil" not in low:
-        fails.append("%s detailed_description 没有任何瞳孔方向描述（R54 近景/中近景需 pupils 离轴）" % where)
-        return 1
-    return 0
+    if "pupil" not in low and "eyeline" not in low:
+        warn_bucket.append("%s detailed_description 没写 eyeline 落点或 pupils 方向（R52 人物不看镜头）" % where)
+    return warn_bucket
 
 
 def check_camera_gaze(text, where, fails):
@@ -426,22 +362,10 @@ def check_transitions(pr_pairs, seg_pairs, allow_transition, fails, warns):
             if m and not any(k in m.group(1) for k in TRANSITION_WORDS):
                 warns.append(where + "：「转场出」没写清单内的方式（同向运镜／动作匹配／遮挡转场／出入画跟随／光影过渡／跨场硬切），请确认（R57）")
 
-    seg_marked = any(RE_ENTRY.search(d) or RE_EXIT.search(d) for _, d in seg_pairs)
-    if seg_pairs and not seg_marked:
-        warns.append("分段：整份没有 `Entry:`／`Exit:`，按旧稿不回溯保留；新写的段要在 detailed_description 里镜头块前写 Entry、末镜之后台词块之前写 Exit（R57）")
-    elif seg_pairs:
-        for where, d in seg_pairs:
-            if not RE_ENTRY.search(d):
-                fails.append(where + "：detailed_description 缺 `Entry:`（R57：写上一段末帧状态，首拍只停不新起动作）")
-            if not RE_EXIT.search(d):
-                fails.append(where + "：detailed_description 缺 `Exit:`（R57：写定格状态＋停留三五帧＋交接方式，本集末段写 held to the last frame）")
-            m = RE_EXIT.search(d)
-            if m:
-                tail = (d[m.end():].split("\n")[0] or "")
-                if "episode ends" in tail.lower():
-                    continue
-                if not any(k in tail for k in TRANSITION_WORDS):
-                    warns.append(where + "：`Exit:` 没写清单内的交接方式，请确认（R57）")
+    seg_marked = any(RE_ENTRY.search(d) or RE_EXIT.search(d) or "hand-off seamless" in d
+                     or "Transition out:" in d for _, d in seg_pairs)
+    if seg_marked:
+        warns.append("分镜视频里还有 `Entry:`／`Exit:`／hand-off seamless／Transition out 旧标记（R71.8 已作废）：改成 [Shot 1] 首句承接、末句停点＋交给下一段的那一拍")
 
     if not allow_transition:
         for where, txt in list(pr_pairs) + list(seg_pairs):
@@ -990,7 +914,10 @@ def check_placeholders(shots, board_txt, seg_txt, fails, warns):
     for s in shots:
         sid = s["m"].group(1)
         where = "镜头 %s" % sid
-        ref = field_lines(s["body"]).get("参考图", "")
+        if s.get("table"):
+            ref = s["f"].get("参考图", "")
+        else:
+            ref = field_lines(s["body"]).get("参考图", "")
         found = [m.group(0) for m in PLACEHOLDER_RE.finditer(ref)]
         for f in found:
             names.add(f)
@@ -1209,15 +1136,20 @@ def check_dialogue_perf(script_txt, board_txt, seg_txt, fails, warns):
             spk = f.get("说话人", "").strip()
             sec = _seg_sections(g["body"])
             detail = _norm_md(sec.get("detailed_description", ""))
-            lines = list(RE_SEG_DIALOGUE.finditer(detail))
-            if spk and spk != "无" and not re.match(r"^[①②③④⑤⑥⑦⑧⑨⑩]", spk):
-                fails.append("%s「说话人」行不是 `① (S1) 名字 → ② (S2) 名字` 格式（R62.10）：%s" % (where, spk[:30]))
-            elif spk and spk != "无" and "(S1)" not in spk:
-                fails.append("%s「说话人」行缺 `(S1)` 首个台词编号（R62.10）：%s" % (where, spk[:30]))
-            if spk == "无" and lines:
-                fails.append("%s「说话人」写「无」但 detailed_description 有 %d 句台词（R62.10）" % (where, len(lines)))
-            if spk and spk != "无" and not lines:
-                fails.append("%s「说话人」写了说话人但台词块是空的（R62.10）" % where)
+            nd = detail.count("<d>")
+            if spk and spk != "无":
+                if not RE_SPEAKER.search(spk):
+                    fails.append("%s「说话人」行缺 `(S1)`（R71.4）：%s" % (where, spk[:30]))
+                ids = set(re.findall(r"\(S(\d+)\)", spk))
+                used = set(re.findall(r"\(S(\d+)\)", detail))
+                miss = sorted(used - ids)
+                if miss:
+                    warns.append("%s 正文用了 %s，但「说话人」行没登记（R71.2／R71.4）"
+                                 % (where, "、".join("(S%s)" % x for x in miss)))
+            if spk == "无" and nd:
+                fails.append("%s「说话人」写「无」但 detailed_description 有 %d 处台词（R71.4）" % (where, nd))
+            if spk and spk != "无" and not nd:
+                fails.append("%s「说话人」写了说话人但正文没有 <d> 台词（R71.4）" % where)
     return (dlg_total, turns_total)
 
 
@@ -1305,53 +1237,11 @@ def check_vfx(script_txt, board_txt, seg_txt, fails, warns):
 
 
 def check_seam(seg_detail_pairs, fails, warns):
-    """R60：相邻段之间必须二选一——A 无缝接（两段都写 hand-off seamless），
-    或 B 显式转场（前段 Transition out: 方式 — 可见动作；后段 Transition in: 同一方式）。"""
+    """R71.8：段间衔接改由 [Shot 1] 首句与末句承担，脚本不判标签，只提示人工核对。"""
     if len(seg_detail_pairs) < 2:
         return 0
-    declared_any = any(("seamless" in d) or ("Transition out:" in d) or ("Transition in:" in d)
-                       for _, d in seg_detail_pairs)
-    pairs = 0
-    issues = []
-    for i in range(len(seg_detail_pairs) - 1):
-        (w1, d1), (w2, d2) = seg_detail_pairs[i], seg_detail_pairs[i + 1]
-        pairs += 1
-        seamless = ("seamless" in d1) and ("seamless" in d2)
-        out_m = re.search(r"Transition out:\s*([^\n]+)", d1)
-        in_m = re.search(r"Transition in:\s*([^\n]+)", d2)
-        if out_m and in_m:
-            m1 = re.split(r"[—–]", out_m.group(1))[0].strip().strip("，,;；:：")
-            m2 = re.split(r"[—–]", in_m.group(1))[0].strip().strip("，,;；:：")
-            # 方式只取方法名：`cut — to 场景`／`cut to 场景` 都归一到 `cut`
-            m1 = re.sub(r"\s*(?:to|from|到|从)\s+.*$", "", m1).strip()
-            m2 = re.sub(r"\s*(?:to|from|到|从)\s+.*$", "", m2).strip()
-            if m1 and m2 and (m1 not in m2) and (m2 not in m1):
-                issues.append("%s 的 `Transition out:` 方式「%s」与 %s 的 `Transition in:` 方式「%s」不一致；两行必须同名（R60）"
-                              % (w1, m1, w2, m2))
-            if re.search(r"Transition out:[^\n]*[—–][^\n]*", d1) is None:
-                issues.append("%s 的 `Transition out:` 只有方式、没写看得见的转场动作；要写成「方式 — 甩镜／前景遮挡／推入虚焦／光效吞满」这样的一拍（R60）" % w1)
-            if re.search(r"Transition in:[^\n]*[—–][^\n]*", d2) is None:
-                issues.append("%s 的 `Transition in:` 只有方式、没写从什么画面进来；要写成「方式 — 从哪个画面进来」（R60）" % w2)
-            continue
-        if seamless:
-            continue
-        if out_m or in_m:
-            issues.append("%s → %s 的段间转场只写了一半：`Transition out:` 在前段、`Transition in:` 在后段，两段都要写（R60）"
-                          % (w1, w2))
-        else:
-            issues.append("%s → %s 没写段间衔接：要么两段都写 `hand-off seamless`（A 无缝接），要么前段 `Exit` 后写 `Transition out: <方式> — <看得见的转场动作>`、后段 `Entry` 后写 `Transition in: <同一方式>`；只在 Exit 里写 hard cut 不算（R60）"
-                          % (w1, w2))
-    if declared_any:
-        fails.extend(issues)
-        a_cnt = sum(1 for i in range(len(seg_detail_pairs) - 1)
-                    if "seamless" in seg_detail_pairs[i][1] and "seamless" in seg_detail_pairs[i + 1][1])
-        b_cnt = sum(1 for i in range(len(seg_detail_pairs) - 1)
-                    if "Transition out:" in seg_detail_pairs[i][1] and "Transition in:" in seg_detail_pairs[i + 1][1])
-        warns.append("段间衔接（R60）：%d 对相邻段，A 无缝接 %d 处、B 显式转场 %d 处" % (pairs, a_cnt, b_cnt))
-        if pairs and b_cnt > pairs / 2:
-            warns.append("B 显式转场 %d 处，超过段间数量一半；同场能无缝就优先走 A（R60.7）" % b_cnt)
-    else:
-        warns.append("整份分段没有段间衔接声明（`hand-off seamless` 或 `Transition out:`／`Transition in:`），%d 对相邻段按旧稿不回溯；新写的段必须按 R60 二选一：同场写 A 无缝接，换场写 B 显式转场（只写 hard cut 不算）" % pairs)
+    pairs = len(seg_detail_pairs) - 1
+    warns.append("段间衔接（R60／R71.8）：%d 对相邻段；脚本不判，人工核对上段末句与下段首句能否连成一句完整动作、五项（动作／朝向／重心／手持物／光位）是否对得上" % pairs)
     return pairs
 
 
@@ -1436,8 +1326,7 @@ RE_PR_TALK = re.compile(r"[）)]\s*[：:]\s*[^\s]")
 
 
 def check_one_shot(shots, segs, shot_durs, fails):
-    """R63：一镜一段。段数=镜数、一段只有一个 [Shot 1]、段时长=对应镜镜长。
-    旧格式（段内仍写 At MM:SS.mmm 的打包稿）按不回溯原则只提示、不判错。"""
+    """R63／R71.7：一镜一段。段数=镜数、一段只有一个 [Shot 1]、段长（段标题里）＝镜长。"""
     at_re = re.compile(r"At\s+\d{2}:\d{2}\.\d{3}")
     n_shots, n_segs = len(shots), len(segs)
     legacy = any(at_re.search(g["body"]) for g in segs)
@@ -1448,25 +1337,29 @@ def check_one_shot(shots, segs, shot_durs, fails):
             multi.append((g["m"].group(1), n))
     if not legacy:
         if n_segs > n_shots:
-            fails.append("分段 %d 段多于分镜 %d 镜：一镜一段不许拆段（R63）" % (n_segs, n_shots))
+            fails.append("分镜视频 %d 段多于分镜 %d 镜：一镜一段不许拆段（R63）" % (n_segs, n_shots))
         elif n_segs < n_shots:
-            fails.append("分段 %d 段少于分镜 %d 镜：一镜一段要求段数＝镜数，别把镜头组合进一段（R63）"
+            fails.append("分镜视频 %d 段少于分镜 %d 镜：一镜一段要求段数＝镜数，别把镜头组合进一段（R63）"
                          % (n_segs, n_shots))
         for num, n in multi:
-            fails.append("第 %s 段有 %d 个 [Shot]：一段只许一个 [Shot 1]（R63）" % (num, n))
+            fails.append("第 %s 段有 %d 个 [Shot]：一段只许一个 [Shot 1]（R63／R71.7）" % (num, n))
         if n_shots == n_segs:
             ids = [s["m"].group(1) for s in shots]
             for idx, g in enumerate(segs):
                 num = g["m"].group(1)
-                dd_s = field_lines(g["body"]).get("时长", "").split("\n")[0]
-                dd_s = re.sub(r"[^\d]", "", dd_s)
-                dd = int(dd_s) if dd_s else None
+                head = g["m"].group(2) or ""
+                hm = RE_SEG_HEAD.search(head)
+                if not hm:
+                    fails.append("第 %s 段标题没写「镜 N-M / Ns」（应为 `## 第 N 段 ｜ 镜 N-M / Ns ｜ 镜名`，R71.7）" % num)
+                    continue
+                if idx < len(ids) and hm.group(1) != ids[idx]:
+                    fails.append("第 %s 段标题镜号 %s 与第 %d 镜 %s 不一致（R63）" % (num, hm.group(1), idx + 1, ids[idx]))
+                dd = int(hm.group(2))
                 sd = shot_durs.get(ids[idx]) if idx < len(ids) else None
-                if sd and dd and sd != dd:
+                if sd and sd != dd:
                     fails.append("第 %s 段时长 %d 秒 ≠ 镜头 %s 镜长 %d 秒（R63 段长＝镜长）"
                                  % (num, dd, ids[idx], sd))
     return {"shots": n_shots, "segs": n_segs, "legacy": legacy, "multi": len(multi)}
-
 
 
 # ---------------- R70 六列镜头表 ----------------
@@ -1650,17 +1543,19 @@ def main():
     legacy_board = ep_dir / "分镜.md"
     if legacy_board.is_file() and not table_mode:
         fails.append("分镜层还是旧 `分镜.md`（九栏体／陈述句体，原 R68）：旧格式已删除，按 R70 重写成 `分镜/镜头表.md`＋`分镜/文本分镜.md`")
-    required = [board_p, seg_p] + ([] if (args.skip_script or args.reverse) else [script_p])
+    required = [board_p] + ([] if (args.skip_script or args.reverse) else [script_p])
     for p in required:
         if not p.is_file():
             fails.append("缺少文件：%s（分镜层只认 分镜/镜头表.md＋分镜/文本分镜.md，R70）" % p.name)
+    if not seg_p.is_file():
+        warns.append("R71 分镜视频：未生成（等用户点头）——分镜两件确认后先问一句要不要提示词，用户说要才写 分镜视频.md；本轮不判缺")
     if fails:
         report(fails, warns, notes, {}, {}, [])
         return 1
 
     script_txt = read_text(script_p) if script_p.is_file() else ""
     board_txt = read_text(board_p)
-    seg_txt = read_text(seg_p)
+    seg_txt = read_text(seg_p) if seg_p.is_file() else ""
     story_txt = read_text(story_p) if story_p.is_file() else ""
     if table_mode and not story_txt:
         fails.append("缺文件：分镜/文本分镜.md（R70 三件套必须两份同批）")
@@ -1727,7 +1622,7 @@ def main():
             def group(self, i):
                 return self.v
 
-        shots = [{"m": _M(r["id"]), "body": r["desc"]} for r in rows]
+        shots = [{"m": _M(r["id"]), "body": r["desc"], "f": {"参考图": r["anchors"]}, "table": True} for r in rows]
     else:
         board_scenes = split_blocks(board_txt, RE_BOARD_SCENE)
         if not board_scenes:
@@ -1819,6 +1714,7 @@ def main():
                 "参考图": r["anchors"],
                 "提示词": r["desc"],
             }
+            f["参考图"] = r["anchors"]
             shot_frames.append({"id": r["id"], "f": f, "pr": r["desc"], "prose": False, "table": True})
             board_prompt_all.append(r["desc"] + "\n" + r["audio"])
             shot_pr_pairs.append((where, r["desc"]))
@@ -1832,10 +1728,10 @@ def main():
     if shot_durs and any(v is None for v in shot_durs.values()):
         fails.append("有镜头没在「拍摄手法」里写「镜长 N 秒」，时长合计不可信")
 
-    # ---------- 分段 ----------
-    segs = split_blocks(seg_txt, RE_SEG)
-    if not segs:
-        fails.append("分镜视频.md 未找到段标题（应为「## 第 N 段 ｜ 场名」）")
+    # ---------- 分镜视频（R71） ----------
+    segs = split_blocks(seg_txt, RE_SEG) if seg_txt else []
+    if seg_txt and not segs:
+        fails.append("分镜视频.md 未找到段标题（应为「## 第 N 段 ｜ 镜 N-M / Ns ｜ 镜名」，R63／R71.7）")
 
     seg_prompt_all = []
     seg_detail_pairs = []
@@ -1843,40 +1739,41 @@ def main():
     for g in segs:
         num = g["m"].group(1)
         where = "第 %s 段" % num
+        head = g["m"].group(2) or ""
+        hm = RE_SEG_HEAD.search(head)
+        declared = int(hm.group(2)) if hm else None
+        if hm is None:
+            fails.append("%s 段标题缺「镜 N-M / Ns」（应为 `## 第 N 段 ｜ 镜 N-M / Ns ｜ 镜名`，R71.7）" % where)
         f = field_lines(g["body"])
         for name in SEG_FIELDS:
             if name not in f:
-                fails.append("%s 缺「%s」元数据字段" % (where, name))
+                fails.append("%s 缺「%s」元数据行（R71.7：只留 `* 参考图：@图片 N` 与 `* 说话人：(S1) 名 → (S2) 名`）" % (where, name))
         sec = check_segment_sections(g["body"], where, fails, warns)
         detail = sec.get("detailed_description", "")
         seg_prompt_all.append(detail)
         seg_detail_pairs.append((where, detail))
-        check_segment_dialogue(sec, where, fails)
+        check_segment_dialogue(sec, where, fails, warns)
         check_segment_music(sec, where, fails)
-        check_segment_gaze(sec, where, fails)
-        dl = re.sub(r"[^\d]", "", f.get("时长", "").split("\n")[0])
-        declared = int(dl) if dl else None
+        for w in check_segment_gaze(sec, where, fails):
+            warns.append(w)
         if declared is None:
-            fails.append("%s「时长」字段没写整数秒" % where)
+            fails.append("%s 段标题没写整数秒段长（R71.7）" % where)
         else:
             if not (4 <= declared <= 15):
-                fails.append("%s 时长 %d 秒不在 4–15 区间" % (where, declared))
+                fails.append("%s 段长 %d 秒不在 4–15 区间（R71.7）" % (where, declared))
             seg_durs.append(declared)
-            check_official_timecodes(detail, declared, where, fails)
         check_slots(f.get("参考图", "") + "\n" + g["body"], where, fails, notes)
-        # 说话人索引：只写 ①②③ 顺序与 (Sx)，不抄原文
         landing = f.get("说话人", "").strip()
         if landing and landing != "无":
             if re.search(r"[\u4e00-\u9fa5]{6,}", landing):
-                fails.append("%s「说话人」抄了原文，只该写说话顺序与 (Sx) 编号" % where)
+                fails.append("%s「说话人」抄了原文，只该写 `(S1) 名 → (S2) 名`（R71.7）" % where)
         check_line_order(landing, where, "说话人", fails)
-        # 转场标注：跨场次切点
-        scene_txt = f.get("场景与轴线", "")
-        if ("转场" in scene_txt) and not re.search(r"hard cut|cuts to|transitions to", detail, re.I):
-            fails.append("%s 声明了转场，但 detailed_description 切点没写 hard cut / cuts to（R19）" % where)
 
     # ---------- 一镜一段（R63） ----------
-    notes["oneshot"] = check_one_shot(shots, segs, shot_durs, fails)
+    if segs:
+        notes["oneshot"] = check_one_shot(shots, segs, shot_durs, fails)
+    else:
+        notes["seg_missing"] = True
 
     # ---------- 译写对账（R66） ----------
     notes["transcode"] = check_transcode(shot_frames, segs, warns)
@@ -1907,15 +1804,16 @@ def main():
         fails.append("分镜合计 %d 秒 vs 分段合计 %d 秒，不相等" % (board_total, seg_total))
 
     # R57/R58：反推按原片时长，不套一集 220–260 秒口径
-    if seg_durs and not args.reverse:
+    ep_total = seg_total if segs else board_total
+    if ep_total and not args.reverse:
         user_sec = re.search(r"用户指定\s*(\d+)\s*秒", script_txt)
         if user_sec:
-            if seg_total != int(user_sec.group(1)):
+            if ep_total != int(user_sec.group(1)):
                 fails.append("一集总时长 %d 秒，与剧本头部用户指定 %d 秒不一致（R37）"
-                             % (seg_total, int(user_sec.group(1))))
-        elif not (220 <= seg_total <= 260):
+                             % (ep_total, int(user_sec.group(1))))
+        elif not (220 <= ep_total <= 260):
             fails.append("一集总时长 %d 秒，不在 4 分钟口径（220–260 秒，目标 240 秒）：少了补戏或并段，多了删并（R37）"
-                         % seg_total)
+                         % ep_total)
 
     if scenes and not table_mode:
         covered = {sc for sc in scenes if sc in board_txt}
@@ -1931,7 +1829,10 @@ def main():
         if len(gap) < 2:
             continue
         expected = script_txt.count(gap)
-        for name, blob in (("分镜.md", board_p), ("分镜视频.md", seg_p)):
+        targets = [("分镜.md", board_p)]
+        if segs:
+            targets.append(("分镜视频.md", seg_p))
+        for name, blob in targets:
             n = blob.count(gap)
             if n != expected:
                 fails.append("台词「%s」在%s出现 %d 次（应为 %d 次，逐字一致且只说一遍）"
@@ -1959,34 +1860,39 @@ def main():
 
 HUMAN = [
     "每镜「拍摄手法」是否每条都带理由（略仰＝被压、略俯＝看手、平视＝同行）",
-    "每镜「动作先后」是否用 ①②③ 拆开了先后，没把两个动作写在同一拍",
-    "「表情」是否先有一句情绪定调（什么情绪、几成、对着谁），再写它对应的肌肉执行清单；只有形容词、或只有肌肉没定调，都不合格",
-    "跨段：前段最后一行与后段第一行能否连成一句完整动作，段尾是否停在静止点",
-    "跨段：手持物余量、服装、脏污、光位、钟点是否接得上",
-    "轴线：同一场是否只在一侧工作，画左画右站位是否跨段不变",
-    "每场「场景站位」的锚点是否都在本场景里真实存在且不动，各人位置对锚点说得通，剧本与分镜同锚点同编号（R26）",
+    "每镜列5 逐秒是否一秒一条、五要素齐（人物动作／身体部位／接触点／方向／镜头），没有两件事挤在同一秒",
+    "「表情」是否先有情绪定调（什么情绪、几成、对着谁），再写眉·眼·鼻·嘴·颈·手的执行清单",
+    "轴线：同一场是否只在一侧工作，画左画右站位是否全场不变，机位有没有越轴",
+    "每场「场景站位」的锚点是否都在本场景里真实存在且不动，剧本与分镜同锚点同编号（R26）",
     "剧本、分镜里的 @C／@S／@P 是否都能在资产提示词.md 找到，编号跨集不重排，三节提示词能直接粘去文生图（R27）",
-    "人物资产是否只写了四项（面部特写／正面／侧面／背面）、不分 A／B 层、不写本集选择行、没有擅自补人物档案（R28）",
-    "人物资产四项是否齐（面部特写／正面／侧面／背面）、有没有多余的 A／B 分层或本集选择行，四张之间同一张脸与身高比例服装配饰是否一致（R28）",
-    "场景资产是否只出了用户点的那层，A2–A4 每条是否可粘提示词带图槽，A3 布局图里画不画得出锚点物，B6 空间规则与 R26 站位是否一致（R29）",
-    "三类资产是否都只交了提示词与槽号，没有图片文件、路径或「已出图」说法，交付报告没把提示词说成图片已生成（R30）",
-    "一镜一段（R63）：分镜有多少镜、分段是否就有多少段，段名与镜名是否同名，每段是否只有一个 [Shot 1] 且没有段内时间码；不足 4 秒的镜是否已在分镜层并进相邻镜（动作一句没丢），超过 15 秒的镜是否已拆成两镜",
-    "转场（R57）：每镜「转场出」的末帧状态与下一镜「承接」的五项（动作／朝向／重心／手持物／光位）是否真对得上；前段 Exit 与后段 Entry 的方式与末帧是否同一套说法；是否出现黑场／闪白／叠化／淡入淡出，或转场遮脸遮嘴、拦腰打断正在说的台词",
-    "打斗（R61）：该场「打斗回合」每回合三段（谁先动／接触点／结果）是否都写得出；正文四句式是否落地、身体是否写到关节肌肉承重；有没有连续三回合同一人进攻、有没有一处局面变化；分镜是不是一镜一回合、起势→接触→受力顺序不乱、每击是否都落了可见结果（R61）",
-    "对话与表情（R62）：台词是不是一句一人、每 1–4 句之间有一句身体准备；表情两层（情绪＋几成＋对着谁／眉·眼·鼻·嘴·颈·手）是否齐；正反打有没有连切超过 3 次、听者反应镜有没有抢戏；说话人与听者的口型是否分开写、独白镜是否唇齿闭合；`overall_soundscape` 是否写了嗓音质感而不是台词（R62）",
-    "参考画风（R64）：三份资产头两行是不是「参考画风：REF-…（参考，不照搬）」＋「本剧形象：…」；每条提示词是否先写本剧形象（身份／年龄／体型／发型发色／服装款式与磨损／伤势／随身物；场景写剧情要求的布局与时代痕迹；道具写剧情要求的形状尺寸材质磨损），再写参考画风只取质感／配色／材质／打光；有没有照搬参考图里的人脸长相、姿态、构图、服装款式、建筑与道具种类；参考图与剧情冲突时是不是以剧情为准",
-    "逐件确认（R65）：这一轮是不是只交了一件（分段那轮是「分段＋交接」两件同批）；剧本→人物资产→场景道具→分镜→分段＋交接，每道门是否都等到了用户明确的「可以／继续」；有没有在用户没点头时顺手做下一件、或在交付时预告了下一件内容。",
-    "译写对账（R66）：把镜头表第 N 行与文本分镜第 N 节跟第 N 段并排读——景别／机位高度／角度／轴线／运动是否都译进 [Shot 1] 与「场景与轴线」（50mm、1.5 米、约七十度斜角、固定加一次极轻推近要读得出来）；动作是否照原句的关节承重位移写、没被替换成别的动作；「动作先后」几拍就几组动作分句；「表情」的几成与眉／眼／瞳孔／鼻／咬肌／唇／喉／肩颈／手是否逐项落进英文表情句；自然规律的光位、投影、雾、白气、水痕是否进了 Shot 句；声音是否只进 overall_soundscape 与嗓音提示、没抄台词；台词是否逐字进 (Sx) 块；参考图是否只进元数据与图槽、正文写中文名；起幅与「承接」「转场出」是否各自变成 Shot 句开头、Entry、Exit。有没有多出分镜没有的动作／台词／道具／镜头，有没有把「理由」「为了让……」译进正文，有没有改景别机位，有没有两镜并一段。",
-    "分镜全信息稿（R67）：台词原文、表情五段、打斗回合、光效起中收是不是都在分镜层写完了——「台词」栏非「无」的镜提示词里有几句 `角色（…）：原文`，说几句写几行；打斗镜「动作」栏首句是不是 `回合 N｜谁先动｜接触点｜结果`；带光效的打斗同镜提示词是否 起→中→收 三阶段齐、`转场出：` 是否写了衰减档位；有没有哪一样是留到分镜视频层才补的（有就退回补分镜）",
+    "人物资产是否只写了四项（面部特写／正面／侧面／背面）、不分层、不写本集选择行（R28）",
+    "场景资产是否只出了用户点的那层，每条是否可粘提示词带图槽（R29）",
+    "三类资产是否只交了提示词与槽号，没有图片文件、路径或「已出图」说法（R30）",
+    "分镜视频（R71）有没有先问一句：分镜两件确认后，用户说要才写 `分镜视频.md`；说不要就停在分镜，没写「待补」",
+    "双源取料（R71.2）：第 N 段是否同时用了镜头表第 N 行（列1 秒数／列2 交接／列3 锚点与光／列5 逐秒／列6 台词与声音）与文本分镜第 N 节（十一字段、逐格、视线与道具格）；只读一份就是漏料",
+    "六段（R71.3）：顺序是不是 subject_definitions→summary→retention_analysis→detailed_description→overall_soundscape→non_diegetic_music；summary 是否方括号任务类型开头；retention 是否一项一行带 (appears in [Shot 1])、四档标记、没有 (Sx)",
+    "字数（R71.6）：detailed_description 是否 350–500 英文词；风格句 1–2 句是否写在 [Shot 1] 之前；有没有写画师名与 IP",
+    "台词（R71.4）：是不是 `<d>[Chinese] 原文</d>`、逐字、标点照抄、一句只出现一次；(Sx) 是否按发声先后分配并复用；画外音／独白有没有闭唇句；summary／retention／soundscape 有没有抄台词",
+    "不看镜头（R52／R71.9）：每处写脸或眼睛的句子有没有 eyeline 落点，近景有没有 pupils 离轴；有没有 look into the lens／look at the camera／first-person POV",
+    "一镜一段（R63／R71.7）：镜数＝段数；每段只有一个 [Shot 1]、全文搜不到 [Shot 2] 与时间码；段标题镜号与镜长与镜头表一致；不足 4 秒的镜已在分镜层并进相邻镜",
+    "接缝（R60／R71.8）：每段第一句是否承接上段末帧的五项（动作／朝向／重心／手持物／光位）；最后一句是否停在可截帧的静止点并写清交给下一段的那一拍；同场走 A、换场走 B；没有 Entry:／Exit:／hand-off seamless 旧标签",
+    "译写对账（R66／R71.2）：景别／机位高度／角度／轴线／运动有没有译进 [Shot 1] 冒号前；动作是不是照原句关节承重位移写、拍数不减；表情几成与眉／眼／瞳孔／鼻／咬肌／唇／喉／手是否逐项落进英文；光位、投影、雾、水痕、白气有没有进 Shot 句；有没有多出分镜没有的动作／台词／道具，有没有把「理由」译进正文，有没有改景别机位",
+    "分镜全信息稿（R67）：台词原文、表情五段、打斗回合、光效起中收是不是都在分镜层写完了；有没有哪一样留到分镜视频层才补",
+    "特效（R59）：[VFX] 五行齐；分镜落进四处并按起→中→收；分镜视频用分号串阶段、带颜色材质光向、术语全片一致；[SFX] 行数不少于 [VFX]；没有「炫酷／特效拉满」",
+    "打斗（R61）：每回合三段（谁先动／接触点／结果）齐；一回合一段四句式；一镜不超过两回合；每击落可见结果；没有「两人激烈交锋／一顿猛打」这类空词",
+    "对话与表情（R62）：台词一句一人、每 1–4 句之间有一句身体准备；表情两层齐；正反打没有连切超过 3 次；说话人与听者口型分开写、独白镜闭唇；overall_soundscape 写嗓音质感不抄台词",
+    "参考画风（R64）：三份资产头两行是不是「参考画风：REF-…（参考，不照搬）」＋「本剧形象：…」；每条提示词是否先写本剧形象，再写参考画风只借质感；冲突以剧情为准",
+    "逐件确认（R65）：剧本→人物资产→场景道具→分镜→分镜视频＋交接，每道门是否都等到了用户明确的「可以／继续」；有没有在用户没点头时顺手做下一件",
 ]
 
 
 def report(fails, warns, notes, info, _unused, segs):
     print("== 阿良分镜规则 · 机械自检 ==")
     if info:
-        print("场次=%s 台词=%s 镜数=%s 分镜合计=%ss 段数=%s 分段合计=%ss"
-              % (info["scenes"], info["lines"], info["shots"], info["board_total"],
-                 info["segs"], info["seg_total"]))
+        seg_tail = ("段数=%s 分段合计=%ss" % (info["segs"], info["seg_total"])) if info["segs"] \
+            else "段数=0（分镜视频未生成，等用户点头）"
+        print("场次=%s 台词=%s 镜数=%s 分镜合计=%ss %s"
+              % (info["scenes"], info["lines"], info["shots"], info["board_total"], seg_tail))
         if info["shot_durs"]:
             print("逐镜时长：" + "/".join("%s=%ss" % (k, v) for k, v in info["shot_durs"].items()))
         if info["seg_durs"]:
