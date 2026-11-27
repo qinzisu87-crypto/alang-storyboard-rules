@@ -718,10 +718,23 @@ def check_scene_assets(txt, fails, warns):
 
 STYLE_DECL = re.compile(r"参考画风[：:]\s*(REF-\d{3})")
 STYLE_DECL_OLD = re.compile(r"画风[：:]\s*(REF-\d{3})")
+# R72 口径的声明行：`画风：REF-900 冰蓝仙侠·三维写实（纯文字口径）`
+STYLE_DECL_TEXT = re.compile(r"画风[：:]\s*(REF-\d{3})[^（(\n]{0,40}[（(]纯文字")
 STYLE_TAIL = re.compile(r"参考画风\s*(?:按)?\s*(REF-\d{3})")
 STYLE_TAIL_OLD = re.compile(r"画风\s*按\s*(REF-\d{3})\s*[：:]")
 STYLE_ANY = re.compile(r"(REF-\d{3})")
 STYLE_STORY = re.compile(r"本剧|剧情|形象|人设")
+# R72（2026-11-27）：画风必须写成文字——纯文本生图时图与编号对模型不可见
+STYLE_TEXT_DECL = re.compile(r"画风文字[：:]\s*(\S.{5,})", re.M)
+STYLE_DIMS = {
+    "渲染": ("三维写实", "写实", "半写实", "厚涂", "赛璐璐", "水彩", "实拍", "二维", "渲染"),
+    "配色": ("低饱和", "主调", "主色", "配色", "青灰", "冰蓝", "月白", "暖琥珀", "色温", "点缀"),
+    "材质": ("质感", "材质", "哑光", "真丝", "湿润", "粗糙", "磨损", "颗粒", "布料", "棉麻"),
+    "光": ("柔光", "棚拍", "光比", "光位", "打光", "体积雾", "天光", "轮廓光", "主光", "阴影"),
+    "镜头": ("浅景深", "虚化", "广角", "微距", "景深", "镜头", "透视", "mm"),
+}
+STYLE_POINTER = re.compile(r"见参考图|参考图见|同上|按参考图|见附件|风格同前")
+STYLE_TEXT_N = 0
 
 
 def check_line_order(field, where, label, fails):
@@ -742,8 +755,14 @@ def check_style(texts, fails, warns):
     人物资产.md 用人物号；场景资产.md 用场景道具号；资产提示词.md 按小节分别对号；
     每条带「提示词」的条目都要写 `参考画风 REF-xxx`（可后跟一句取舍说明），编号与本层对号，
     并且提示词里要写到本剧形象；旧的 `画风：REF-…` / `画风 按 REF-…：` 按不回溯只提醒。"""
+    global STYLE_TEXT_N
+    STYLE_TEXT_N = 0
+
     def codes_of(txt):
-        return sorted(set(STYLE_DECL.findall(txt)))
+        cs = sorted(set(STYLE_DECL.findall(txt)))
+        if cs:
+            return cs
+        return sorted(set(STYLE_DECL_TEXT.findall(txt)))
 
     decls, legacy = {}, {}
     for name, txt in texts.items():
@@ -795,7 +814,7 @@ def check_style(texts, fails, warns):
             continue
         if name == "人物资产.md":
             expect = char_code
-        elif name == "场景资产.md":
+        elif name in ("场景资产.md", "道具资产.md"):
             expect = scene_code
         else:
             # 资产提示词.md：按「## 人物／## 场景／## 道具」小节分号
@@ -837,6 +856,36 @@ def check_style(texts, fails, warns):
     if legacy_tails:
         warns.append("提示词尾巴还是旧口径「画风 按 REF-…：」（%s）：R64 起改「参考画风 REF-xxx（取其质感，形象按本剧）」，旧稿不回溯"
                      % "、".join(legacy_tails))
+
+    # ---- R72：画风文字（纯文本生图） ----
+    for name, txt in texts.items():
+        m = STYLE_TEXT_DECL.search(txt)
+        if not m:
+            warns.append("%s 缺「画风文字：…」一行（R72：纯文本生图时编号与参考图对模型不可见，画风必须写成整句；旧稿不回溯，新写必补）" % name)
+            continue
+        STYLE_TEXT_N += 1
+        dims = sum(1 for ws in STYLE_DIMS.values() if any(w in m.group(1) for w in ws))
+        if dims < 4:
+            warns.append("%s 的「画风文字」只写到 %d 维（渲染／配色／材质／光／镜头至少四维，R72）" % (name, dims))
+    thin, pointer = [], []
+    for name, txt in texts.items():
+        for line in txt.splitlines():
+            st = line.strip()
+            if not st.startswith("-") or "提示词" not in st:
+                continue
+            body = st.split("提示词", 1)[1]
+            body = re.split(r"参考画风\s*(?:按)?\s*REF-\d{3}", body)[0]
+            dims = sum(1 for ws in STYLE_DIMS.values() if any(w in body for w in ws))
+            if dims < 2:
+                thin.append("%s「%s」" % (name, st[2:26]))
+            if STYLE_POINTER.search(body):
+                pointer.append("%s「%s」" % (name, st[2:26]))
+    if thin:
+        warns.append("有条目正文几乎没写画风文字（%s）：R72 要求每条提示词正文自带渲染／配色／材质／光与镜头，`参考画风 REF-xxx` 尾巴只作台账"
+                     % "、".join(thin[:4]))
+    if pointer:
+        warns.append("有条目用指代代替画风（%s）：`见参考图／同上／按参考图` 在纯文本生图里等于没说（R72）"
+                     % "、".join(pointer[:4]))
 
     return "%s／%s（参考，不照搬）" % (char_code, scene_code) if len(all_codes) > 1 \
         else "%s（参考，不照搬）" % char_code
@@ -1273,7 +1322,11 @@ def check_transcode(shot_frames, segs, warns):
         num = g["m"].group(1)
         where = "第 %s 段（对镜头 %s）" % (num, sf["id"])
         detail = _seg_sections(g["body"]).get("detailed_description", "")
-        cam = sf["f"].get("拍摄手法", "")
+        cam_all = sf["f"].get("拍摄手法", "")
+        cam = cam_all
+        cam_m = re.search(r"景别／机位：([^；<]+)", re.sub(r"<br>", " ", cam_all))
+        if cam_m:
+            cam = cam_m.group(1)
         size = None
         for zh, tokens in SHOT_SIZE_MAP:
             if zh in cam:
@@ -1694,6 +1747,8 @@ def main():
     style = "" if args.reverse else check_style(texts, fails, warns)
     if style:
         notes["style"] = style
+    if STYLE_TEXT_N:
+        notes["style_text"] = STYLE_TEXT_N
 
     board_prompt_all = []
     shot_pr_pairs = []
@@ -1881,7 +1936,8 @@ HUMAN = [
     "特效（R59）：[VFX] 五行齐；分镜落进四处并按起→中→收；分镜视频用分号串阶段、带颜色材质光向、术语全片一致；[SFX] 行数不少于 [VFX]；没有「炫酷／特效拉满」",
     "打斗（R61）：每回合三段（谁先动／接触点／结果）齐；一回合一段四句式；一镜不超过两回合；每击落可见结果；没有「两人激烈交锋／一顿猛打」这类空词",
     "对话与表情（R62）：台词一句一人、每 1–4 句之间有一句身体准备；表情两层齐；正反打没有连切超过 3 次；说话人与听者口型分开写、独白镜闭唇；overall_soundscape 写嗓音质感不抄台词",
-    "参考画风（R64）：三份资产头两行是不是「参考画风：REF-…（参考，不照搬）」＋「本剧形象：…」；每条提示词是否先写本剧形象，再写参考画风只借质感；冲突以剧情为准",
+    "参考画风（R64）：三份资产头三行是不是「画风：REF-…（纯文字口径）」＋「画风文字：…」＋「本剧形象：…」；每条提示词是否先写本剧形象，再写整句画风文字；参考只借质感、冲突以剧情为准",
+    "画风文字（R72）：三份资产与资产提示词.md 有没有「画风文字：…」一整句（渲染／配色／材质／光／镜头至少四维）；每条提示词正文是否自带这句，而不是只写「参考画风 REF-900（取其质感…）」就算交代；有没有「见参考图／同上／按参考图」这类指代；换画风时是不是编号、画风文字、全部条目三处一起换",
     "逐件确认（R65）：剧本→人物资产→场景道具→分镜→分镜视频＋交接，每道门是否都等到了用户明确的「可以／继续」；有没有在用户没点头时顺手做下一件",
 ]
 
@@ -1905,6 +1961,8 @@ def report(fails, warns, notes, info, _unused, segs):
             print("场景资产：选择=%s，场景=%s 个" % (info.get("scene_choice"), info["scene_ids"]))
         if info.get("style"):
             print("参考画风：%s（只作质感参考，形象按剧情）" % info["style"])
+        if notes.get("style_text"):
+            print("R72 画风文字：%d 份已写（纯文本口径，正文自带画风句）" % notes["style_text"])
         if notes.get("camera_gaze"):
             print("R49 看镜头写法：%d 处（明细见 FAIL）" % notes["camera_gaze"])
         if notes.get("fight") and notes["fight"][0]:
