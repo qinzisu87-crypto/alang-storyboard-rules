@@ -1031,6 +1031,7 @@ FIGHT_BANNED = ("两人激烈交锋", "激烈交锋", "一顿猛攻", "不分胜
 RE_FIGHT_ROUND = re.compile(r"^[ \t]*[-*]?\s*回合\s*[0-9一二三四五六七八九十]+\s*[：:]")
 RE_FIGHT_TAG = re.compile(r"^[ \t]*\[FIGHT\]", re.I)
 RE_CIRCLED = re.compile(r"[①②③④⑤⑥⑦⑧⑨⑩]")
+RE_CIRCLED_STR = "①②③④⑤⑥⑦⑧⑨⑩"
 
 
 def check_fight(script_txt, board_txt, seg_txt, fails, warns):
@@ -1444,6 +1445,8 @@ def check_board_full(board_txt, shot_frames, warns):
             fight_secs.add(blk["m"].group(1))
     talk_bad, round_bad, expr_bad = 0, 0, 0
     for sf in shot_frames:
+        if sf.get("prose"):
+            continue  # R68 陈述句体：台词写成「他说：「原文」」，R67.3 的 `角色（…）：原文` 只对九栏体生效
         sid, f, pr = sf["id"], sf["f"], sf["pr"]
         where = "镜头 " + sid
         tline = f.get("台词", "").strip()
@@ -1472,6 +1475,90 @@ def check_board_full(board_txt, shot_frames, warns):
                 warns.append("%s 在第 %s 场的打斗里，但「动作」栏首句没有 `回合 N｜谁先动｜接触点｜结果` 三段行；回合先在分镜写全（R67.4）"
                              % (where, sec))
     return {"talk": talk_bad, "round": round_bad, "expr": expr_bad}
+
+
+RE_PROSE_LENS = re.compile(r"(\d+|[一二三四五六七八九十百]+)\s*(?:毫米|mm)")
+RE_PROSE_H = re.compile(r"机位\s*(?:高\s*)?(?:[一二三四五六七八九十点零]+|\d+(?:\.\d+)?)\s*米")
+RE_PROSE_TILT = re.compile(r"(略仰|略俯|平视|微微仰|微微俯)")
+RE_PROSE_MOVE = re.compile(r"(固定|推近|缓推|跟移|侧跟|后退|摇|移|升|降|甩)")
+RE_PROSE_TAKE = re.compile(r"(大远景|全景|中景转全景|中景转近景|全景转中景|双人中景|中近景|中景|近景转中景|近景|特写|半身|过肩)")
+PROSE_BODYPART = ("掌", "脚", "肩", "膝", "喉", "指", "臂", "腕", "腰", "臀", "眼", "眉", "嘴")
+PROSE_VOICE = ("语速", "音量", "语速每秒", "气声", "尾音", "句尾", "腔")
+
+
+def prose_fields(body, head):
+    """R68：把陈述句体的镜正文拆成下游要用的字段（只为兼容既有检查，不替代正文）。"""
+    lines = [l.strip() for l in body.splitlines() if l.strip()]
+    txt = "\n".join(lines)
+    sents = [x.strip() for x in re.split(r"(?<=[。！？])", txt) if x.strip()]
+
+    def join(pred):
+        return "／".join(s for s in sents if pred(s))
+
+    lens = "／".join(s for s in sents if "毫米" in s or "机位" in s)
+    expr = join(lambda s: ("成" in s) or (("眉" in s or "眼" in s) and ("嘴" in s or "唇" in s)))
+    nature = join(lambda s: ("光" in s or "雾" in s or "影" in s) and "「" not in s)
+    sound = join(lambda s: ("声" in s or "响" in s) and "「" not in s)
+    act = "／".join(s for s in sents
+                   if "「" not in s and "成" not in s and any(k in s for k in PROSE_BODYPART))
+    ref = "／".join(l for l in lines if l.startswith("参考"))
+    beats = "／".join(s for s in sents if re.search(r"[①②③④⑤⑥⑦⑧⑨⑩]", s))
+    names = []
+    for m in re.finditer(r"([\u4e00-\u9fa5A-Za-z]{2,6})\s*（[^）]*）\s*：\s*「", txt):
+        nm = m.group(1)
+        if nm not in names:
+            names.append(nm)
+    talk = "".join("%s %s" % (RE_CIRCLED_STR[min(i, 9)], n) for i, n in enumerate(names)) if names else "无"
+    f = {
+        "拍摄手法": lens,
+        "动作": act,
+        "动作先后": beats,
+        "表情": expr,
+        "自然规律": nature,
+        "声音": sound,
+        "台词": talk,
+        "参考图": ref,
+        "提示词": txt,
+    }
+    return f
+
+
+def prose_duration(head, body):
+    m = re.search(r"(\d+)\s*秒", head) or re.search(r"(\d+)\s*秒", body)
+    return int(m.group(1)) if m else None
+
+
+def check_prose(body, head, where, warns):
+    """R68：陈述句体五件事必须讲清——镜头怎么动／人物怎么动／表情什么样／怎么说话／末帧停在哪。"""
+    lines = [l.strip() for l in body.splitlines() if l.strip()]
+    txt = "\n".join(lines)
+    bad = []
+    if not RE_PROSE_LENS.search(txt) or not RE_PROSE_H.search(txt):
+        bad.append("镜头规格（多少毫米、机位几米）")
+    if not RE_PROSE_TILT.search(txt):
+        bad.append("俯仰（略仰／略俯／平视）")
+    if not RE_PROSE_MOVE.search(txt):
+        bad.append("怎么动（固定／推近／跟移／后退）")
+    if not RE_PROSE_TAKE.search(txt):
+        bad.append("景别（全景／中景／近景／特写）")
+    if "成" not in txt:
+        bad.append("表情几成")
+    if not any(k in txt for k in ("眉", "眼", "嘴", "唇")):
+        bad.append("表情肌肉")
+    if "视线" not in txt and "目光" not in txt and "眼" not in txt:
+        bad.append("视线落点")
+    if "「" in txt:
+        if not any(v in txt for v in PROSE_VOICE):
+            bad.append("说话怎么说（语速／音量／尾音）")
+        if not re.search(r"「[^」]{2,}」", txt):
+            bad.append("台词原文的「」引号")
+    if prose_duration(head, body) is None:
+        bad.append("镜长几秒")
+    if not any(k in txt for k in ("停在", "停住", "停一下", "出画", "离开", "散尽", "定住", "收在本", "画面停在")):
+        bad.append("末帧停在哪")
+    if bad:
+        warns.append("%s 陈述句体缺：%s；照 `references/分镜陈述句体样例.md` 用普通陈述句补上（R68）"
+                     % (where, "／".join(bad)))
 
 
 def check_one_shot(shots, segs, shot_durs, fails):
@@ -1664,17 +1751,29 @@ def main():
     for s in shots:
         sid = s["m"].group(1)
         where = "镜头 %s" % sid
-        f = field_lines(s["body"])
-        for name in SHOT_FIELDS:
-            if name not in f:
-                fails.append("%s 缺「%s」栏" % (where, name))
-        pr = prompt_text(f)
-        shot_frames.append({"id": sid, "f": f, "pr": pr})
-        board_prompt_all.append(pr)
-        shot_pr_pairs.append((where, pr))
-        check_prompt_detail(pr, where, fails)
-        check_no_timecode(pr, where, fails)
-        dur = shot_duration(f)
+        head = s["m"].group(2) or ""
+        raw = field_lines(s["body"])
+        prose = (not raw.get("拍摄手法")) and ("毫米" in s["body"] or "机位" in s["body"])
+        if prose:
+            notes["prose"] = notes.get("prose", 0) + 1
+            f = prose_fields(s["body"], head)
+            pr = f["提示词"]
+            check_prose(s["body"], head, where, warns)
+            pr = ""  # 陈述句体正文即提示词，不再额外校验
+        else:
+            notes["legacy"] = notes.get("legacy", 0) + 1
+            f = raw
+            for name in SHOT_FIELDS:
+                if name not in f:
+                    fails.append("%s 缺「%s」栏" % (where, name))
+            pr = prompt_text(f)
+        shot_frames.append({"id": sid, "f": f, "pr": f.get("提示词", ""), "prose": prose})
+        board_prompt_all.append(f.get("提示词", ""))
+        shot_pr_pairs.append((where, f.get("提示词", "")))
+        if not prose:
+            check_prompt_detail(pr, where, fails)
+            check_no_timecode(pr, where, fails)
+        dur = shot_duration(f) if not prose else prose_duration(head, s["body"])
         shot_durs[sid] = dur
         if dur and dur > 15:
             warns.append("%s 单镜 %d 秒，超过 H3 单次上限，须并进容器或拆镜" % (where, dur))
@@ -1871,6 +1970,7 @@ HUMAN = [
     "逐件确认（R65）：这一轮是不是只交了一件（分段那轮是「分段＋交接」两件同批）；剧本→人物资产→场景道具→分镜→分段＋交接，每道门是否都等到了用户明确的「可以／继续」；有没有在用户没点头时顺手做下一件、或在交付时预告了下一件内容。",
     "译写对账（R66）：把分镜第 N 镜的九栏与第 N 段并排读——景别／机位高度／角度／轴线／运动是否都译进 [Shot 1] 与「场景与轴线」（50mm、1.5 米、约七十度斜角、固定加一次极轻推近要读得出来）；动作是否照原句的关节承重位移写、没被替换成别的动作；「动作先后」几拍就几组动作分句；「表情」的几成与眉／眼／瞳孔／鼻／咬肌／唇／喉／肩颈／手是否逐项落进英文表情句；自然规律的光位、投影、雾、白气、水痕是否进了 Shot 句；声音是否只进 overall_soundscape 与嗓音提示、没抄台词；台词是否逐字进 (Sx) 块；参考图是否只进元数据与图槽、正文写中文名；起幅与「承接」「转场出」是否各自变成 Shot 句开头、Entry、Exit。有没有多出分镜没有的动作／台词／道具／镜头，有没有把「理由」「为了让……」译进正文，有没有改景别机位，有没有两镜并一段。",
     "分镜全信息稿（R67）：台词原文、表情五段、打斗回合、光效起中收是不是都在分镜层写完了——「台词」栏非「无」的镜提示词里有几句 `角色（…）：原文`，说几句写几行；打斗镜「动作」栏首句是不是 `回合 N｜谁先动｜接触点｜结果`；带光效的打斗同镜提示词是否 起→中→收 三阶段齐、`转场出：` 是否写了衰减档位；有没有哪一样是留到分段层才补的（有就退回补分镜）",
+    "陈述句体（R68）：每镜是不是写成普通陈述句、像作文一样把这个镜头讲清楚——镜头多少毫米、机位几米、略仰略俯还是平视、固定还是推近跟移；人物先动哪只手哪只脚、重心怎么移；表情几成、眉眼嘴怎么动、视线落在哪；台词是谁说的、语速音量尾音怎么收；末帧停在什么画面上。有没有退回成条目罗列（「- 拍摄手法：」那种九栏标签），有没有漏掉镜长秒数",
 ]
 
 
@@ -1902,6 +2002,9 @@ def report(fails, warns, notes, info, _unused, segs):
             o = notes["oneshot"]
             tail = "（旧格式多镜打包，按不回溯未判错）" if o["legacy"] else ""
             print("R63 分段＝镜数 %d／段数 %d%s" % (o["shots"], o["segs"], tail))
+        if notes.get("prose"):
+            print("R68 陈述句体：%d 镜（另 %d 镜仍用九栏体，旧稿不回溯）"
+                  % (notes["prose"], notes.get("legacy", 0)))
         if notes.get("boardfull") and any(notes["boardfull"].values()):
             bf = notes["boardfull"]
             print("R67 分镜全信息：台词 %d 处缺／回合 %d 处缺／表情 %d 处缺（明细见 WARN）"
