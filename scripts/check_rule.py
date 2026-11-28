@@ -588,161 +588,27 @@ def check_standing(blocks, source, defined, fails, warns, anchors):
 
 RE_CHAR_BLOCK = re.compile(r"^##\s+(C\d{2})\s*(?:｜|\|)?\s*(.+)$", re.M)
 RE_CHAR_CHOICE = re.compile(r"本集选择[：:]\s*(\S+)", re.M)
-A_ITEMS = ["人物设定卡", "面部半身特写", "服装三视图"]
-LEGACY_A_NAMES = ("三视图", "面部特征", "服装结构", "发型与配饰", "身体比例")
-
-
-def check_char_assets(txt, fails, warns):
-    """R28／R74：人物资产只有三张（人物设定卡／面部半身特写／服装三视图），不分 A／B 层、不写本集选择；
-    每条须是可粘提示词并带图槽；旧式 A／B 分层、五项与旧四项 A1–A4 只提醒不判失败（不回溯）。"""
-    blocks = list(RE_CHAR_BLOCK.finditer(txt))
-    if not blocks:
-        fails.append("人物资产.md 没有角色段（应为「## C01 周野」）（R28）")
-        return set()
-
-    ids = {b.group(1) for b in blocks}
-    if RE_CHAR_CHOICE.search(txt) or "### A 资产" in txt or "### B 资产" in txt:
-        warns.append("人物资产.md 仍是旧式 A／B 分层（`本集选择` 或 `### A 资产`／`### B 资产`）；"
-                     "新口径只出三张提示词（人物设定卡／面部半身特写／服装三视图），不分层、不写选择行。"
-                     "旧资产按不回溯保留，下次重出该角色时改四项（R28）")
-        return ids
-
-    for i, b in enumerate(blocks):
-        cid = b.group(1)
-        end = blocks[i + 1].start() if i + 1 < len(blocks) else len(txt)
-        body = txt[b.end():end]
-        heads = re.findall(r"^####\s*A(\d)\s*(.*)$", body, re.M)
-        digits = {h[0] for h in heads}
-        head_names = " ".join(h[1] for h in heads)
-        names = [h[1].strip() for h in heads]
-        is_new = digits == set("123") and len(names) == 3 and all(n in A_ITEMS for n in names)
-        if not is_new and (digits == set("12345") or any(k in head_names for k in LEGACY_A_NAMES)):
-            warns.append("%s 是旧式五项资产（%s）；新口径为 A1 人物设定卡、A2 面部半身特写、A3 服装三视图，三个图槽。"
-                         "旧资产按不回溯保留，下次重出该角色时改三张（R28／R74）"
-                         % (cid, "、".join(sorted(digits))))
-            continue
-        if not is_new and digits == set("1234"):
-            warns.append("%s 是旧式四项资产（面部特写／正面／侧面／背面）；新口径为 A1 人物设定卡、A2 面部半身特写、A3 服装三视图，三个图槽。"
-                         "旧资产按不回溯保留，下次重出该角色时改三张（R28／R74）" % cid)
-            continue
-        if len(heads) < 3 or digits != set("123"):
-            fails.append("%s 的小节应为 A1–A3 三张（人物设定卡／面部半身特写／服装三视图），当前是 %s（R28／R74）"
-                         % (cid, "、".join(sorted(digits)) or "无"))
-        for kw in A_ITEMS:
-            if kw not in body:
-                fails.append("%s 缺「%s」一节（R28）" % (cid, kw))
-        lines = [l for l in body.splitlines() if l.strip().startswith("- ") and "｜" in l]
-        if not lines:
-            fails.append("%s 没有任何条目" % cid)
-        for l in lines:
-            if "提示词" not in l:
-                fails.append("%s 有条目没写成提示词（应以「提示词：」开头，能直接粘去出图）：%s"
-                             % (cid, l.strip()[:36]))
-                break
-        for l in lines:
-            if not SLOT.search(l):
-                fails.append("%s 有条目没写「图槽：@图片 N」：%s" % (cid, l.strip()[:36]))
-                break
-    return ids
-
-
-def _char_body_map(txt):
-    """按角色号取每个 `## Cxx` 段的正文，供拆文件检查用。"""
-    blocks = list(RE_CHAR_BLOCK.finditer(txt))
-    out = {}
-    for i, b in enumerate(blocks):
-        end = blocks[i + 1].start() if i + 1 < len(blocks) else len(txt)
-        out[b.group(1)] = txt[b.end():end]
-    return out
-
-
-def check_char_assets_split(files, fails, warns):
-    """R75：人物资产拆两个文件交付。
-    `人物资产-设定卡.md` 只放 `A1 人物设定卡`；`人物资产-面部与服装.md` 放 `A2 面部半身特写`＋`A3 服装三视图`。
-    两文件各自带画风／画风文字／本剧形象头三行，角色号必须一一对上，槽号 1／2／3 跨两个文件连续。"""
-    card_name = next((n for n in files if "设定卡" in n), None)
-    body_name = next((n for n in files if "面部与服装" in n), None)
-    if card_name is None or body_name is None:
-        fails.append("人物资产必须拆两个文件：`人物资产-设定卡.md`（只 A1）＋`人物资产-面部与服装.md`（A2＋A3）（R75）")
-        return set()
-
-    maps = {n: _char_body_map(txt) for n, txt in files.items()}
-    if not maps[card_name]:
-        fails.append("%s 没有角色段（应为「## C01 周野」）（R28／R75）" % card_name)
-    if not maps[body_name]:
-        fails.append("%s 没有角色段（应为「## C01 周野」）（R28／R75）" % body_name)
-
-    a_ids, b_ids = set(maps[card_name]), set(maps[body_name])
-    for cid in sorted(a_ids ^ b_ids):
-        fails.append("%s 只出现在一个文件里：两个文件同一批角色都要有（R75）" % cid)
-
-    for name, txt in files.items():
-        if RE_CHAR_CHOICE.search(txt) or "### A 资产" in txt or "### B 资产" in txt:
-            warns.append("%s 仍是旧式 A／B 分层或 `本集选择`；新口径只出三张、拆两个文件（R28／R75）" % name)
-
-    for cid in sorted(a_ids & b_ids):
-        # 设定卡文件：只能有一节，且是 A1 人物设定卡
-        heads = re.findall(r"^####\s*A(\d)\s*(.*)$", maps[card_name][cid], re.M)
-        if len(heads) != 1 or heads[0][0] != "1" or "设定卡" not in heads[0][1]:
-            fails.append("%s 的 `%s` 应只有一节 `A1 人物设定卡`，当前是 %s（R75）"
-                         % (cid, card_name, "、".join("A%s %s" % (h[0], h[1].strip()) for h in heads) or "无"))
-        # 面部与服装文件：两节 A2／A3
-        heads2 = re.findall(r"^####\s*A(\d)\s*(.*)$", maps[body_name][cid], re.M)
-        digits2 = {h[0] for h in heads2}
-        names2 = " ".join(h[1] for h in heads2)
-        if len(heads2) != 2 or digits2 != set("23") or "面部半身特写" not in names2 or "服装三视图" not in names2:
-            fails.append("%s 的 `%s` 应为 `A2 面部半身特写`＋`A3 服装三视图` 两节，当前是 %s（R75）"
-                         % (cid, body_name, "、".join("A%s %s" % (h[0], h[1].strip()) for h in heads2) or "无"))
-        for name, body, want in ((card_name, maps[card_name][cid], "设定卡"),
-                                 (body_name, maps[body_name][cid], "面部与服装")):
-            lines = [l for l in body.splitlines() if l.strip().startswith("- ") and "｜" in l]
-            if not lines:
-                fails.append("%s 的 %s 没有任何条目（%s）" % (cid, name, want))
-            for l in lines:
-                if "提示词" not in l:
-                    fails.append("%s 的 %s 有条目没写成提示词：%s" % (cid, name, l.strip()[:36]))
-                    break
-            for l in lines:
-                if not SLOT.search(l):
-                    fails.append("%s 的 %s 有条目没写「图槽：@图片 N」：%s" % (cid, name, l.strip()[:36]))
-                    break
-    return a_ids & b_ids
-
-
-def check_char_portrait(txt, expected_ids, fails, warns):
-    """R80（2026-11-28）：第三份人物资产 `人物资产-立绘.md`，每个角色只出一张 `A4 人物立绘`——
-    单人、全身、竖构图 3:4、浅灰或纯白无缝棚底、站姿、带图槽。"""
+def check_char_assets(txt, fails, warns, files=None):
+    """人物提示词口径自 2026-11-28 整条删除（原 R28／R74／R75／R80，待重设）。
+    本轮人物资产只认清单：每个角色一段 `## Cxx 名字` 加一句身份；不写提示词、不写图槽。"""
     if "本集选择" in txt or "### A 资产" in txt or "### B 资产" in txt:
-        warns.append("人物资产-立绘.md 仍是旧式分层或 `本集选择`；R80 只出一张 A4 人物立绘，旧稿不回溯")
-    blocks = _char_body_map(txt)
+        warns.append("人物资产.md 仍是旧式 A／B 口径：旧稿不回溯；人物提示词等新规则（2026-11-28 已删）")
+
+    blocks = list(re.finditer(r"^##\s*(C\d{2})\s*(.*)$", txt, re.M))
     if not blocks:
-        fails.append("人物资产-立绘.md 没有角色段（应为「## C01 周野」）（R80）")
+        fails.append("人物资产.md 没有角色段（应为「## C01 周野」）")
         return set()
-    ids = set(blocks)
-    if expected_ids:
-        for cid in sorted(expected_ids - ids):
-            fails.append("%s 在 `人物资产-设定卡.md` 有、`人物资产-立绘.md` 没有：三份文件角色号要一一对上（R80）" % cid)
-        for cid in sorted(ids - expected_ids):
-            fails.append("%s 只在 `人物资产-立绘.md` 有、设定卡里没有：三份文件角色号要一一对上（R80）" % cid)
-    for cid, body in blocks.items():
-        heads = re.findall(r"^####\s*A(\d)\s*(.*)$", body, re.M)
-        if len(heads) != 1 or heads[0][0] != "4" or "立绘" not in heads[0][1]:
-            fails.append("%s 的 A4 应只有一节 `A4 人物立绘`，当前是 %s（R80）"
-                         % (cid, "、".join("A%s %s" % (h[0], h[1].strip()) for h in heads) or "无"))
-            continue
-        prompts = [l.strip() for l in body.splitlines() if l.strip().startswith("- ") and "提示词" in l]
-        if not prompts:
-            fails.append("%s 缺一条 `A4 人物立绘` 提示词（R80）" % cid)
-            continue
-        if len(prompts) > 1:
-            fails.append("%s 写了 %d 条立绘提示词：R80 每角色只出一张立绘，不并排、不群像" % (cid, len(prompts)))
-        for l in prompts:
-            if not SLOT.search(l):
-                fails.append("%s 的立绘提示词没写「图槽：@图片 N」：%s" % (cid, l[:36]))
-            if not re.search(r"全身|头顶到鞋底|立绘", l):
-                warns.append("%s 的立绘没写「单人全身／头顶到鞋底」：R80 要一张完整立绘（%s）" % (cid, l[:26]))
-            if not re.search(r"浅中性灰|纯白|无缝", l):
-                warns.append("%s 的立绘没写默认棚底（浅中性灰或纯白无缝）：%s" % (cid, l[:26]))
+
+    ids = set()
+    for i2, b in enumerate(blocks):
+        cid = b.group(1)
+        ids.add(cid)
+        if not b.group(2).strip():
+            fails.append("%s 没写中文名（应为「## C01 周野」）" % cid)
+        end = blocks[i2 + 1].start() if i2 + 1 < len(blocks) else len(txt)
+        body = txt[b.end():end]
+        if "提示词" in body or "@图片" in body:
+            warns.append("%s 里写了「提示词」或图槽：人物提示词口径已整条删除（待重设），新规则下来前不写提示词" % cid)
     return ids
 
 
@@ -1955,35 +1821,20 @@ def main():
         check_handoff(project, args.ep, fails, warns, require=args.require_handoff)
 
     char_texts = {}
-    if char_card_p.is_file() or char_body_p.is_file():
-        for p2 in (char_card_p, char_body_p):
-            if p2.is_file():
-                char_texts[p2.name] = read_text(p2)
-        if not char_card_p.is_file():
-            fails.append("缺文件：人物资产-设定卡.md（R75 起人物资产拆两个文件，这个只放设定卡那张）")
-        if not char_body_p.is_file():
-            fails.append("缺文件：人物资产-面部与服装.md（R75：放面部半身特写＋服装三视图两张）")
-        cids = check_char_assets_split(char_texts, fails, warns)
-    if char_pt_p.is_file():
-        pt_txt = read_text(char_pt_p)
-        char_texts[char_pt_p.name] = pt_txt
-        pids2 = check_char_portrait(pt_txt, cids, fails, warns)
-        notes["portrait_ids"] = len(pids2)
-    elif char_card_p.is_file():
-        warns.append("缺 人物资产-立绘.md：R80 起人物资产拆三份，每角色再出一张 A4 人物立绘（单人全身站姿，竖 3:4）；旧稿不回溯")
-        for n2, tx2 in char_texts.items():
-            check_prompt_terms(tx2, n2, fails)
-        notes["char_ids"] = len(cids)
-        notes["char_choice"] = "—"
-    elif char_p.is_file():
+    if char_p.is_file():
         char_txt = read_text(char_p)
         char_texts["人物资产.md"] = char_txt
-        warns.append("人物资产还是单个 `人物资产.md`；R75 起拆两个文件交付——`人物资产-设定卡.md` 只放 A1 设定卡那张，`人物资产-面部与服装.md` 放 A2 面部半身＋A3 服装三视图（旧单文件按不回溯保留，下一轮换两文件）")
         cids = check_char_assets(char_txt, fails, warns)
         check_prompt_terms(char_txt, "人物资产.md", fails)
         notes["char_ids"] = len(cids)
-        cm = RE_CHAR_CHOICE.search(char_txt)
-        notes["char_choice"] = cm.group(1).strip().upper() if cm else "—"
+        notes["char_choice"] = "—"
+    elif char_card_p.is_file() or char_body_p.is_file() or char_pt_p.is_file():
+        warns.append("人物资产还是旧的三份文件（设定卡／面部与服装／立绘）：人物提示词口径已整条删除（2026-11-28，待重设），新规则下来后只交 `人物资产.md` 的角色清单；旧稿不回溯")
+        for p2 in (char_card_p, char_body_p, char_pt_p):
+            if p2.is_file():
+                char_texts[p2.name] = read_text(p2)
+        notes["char_ids"] = 0
+        notes["char_choice"] = "—"
 
     if scene_p.is_file():
         scene_txt = read_text(scene_p)
@@ -2187,7 +2038,7 @@ HUMAN = [
     "轴线：同一场是否只在一侧工作，画左画右站位是否全场不变，机位有没有越轴",
     "每场「场景站位」的锚点是否都在本场景里真实存在且不动，剧本与分镜同锚点同编号（R26）",
     "剧本、分镜里的 @C／@S／@P 是否都能在资产提示词.md 找到，编号跨集不重排，三节提示词能直接粘去文生图（R27）",
-    "人物资产是否写了四张并拆成三份文件——`人物资产-设定卡.md` 只有 A1，`人物资产-面部与服装.md` 只有 A2＋A3，`人物资产-立绘.md` 只有 A4；三份头三行齐、角色号一一对上、不分层、不写本集选择行；A4 是单人全身立绘、竖 3:4、浅灰或纯白棚底（R28／R74／R75／R80）",
+    "人物资产是否只写了 `## Cxx 名字` 与一句身份、没有写任何人物提示词与图槽（人物提示词口径已整条删除、待重设，2026-11-28）",
     "场景资产是否每场只有正视图＋俯视图两条提示词、都 16:9 带图槽；正视图 24mm 平视全景、结构完整，俯视图严格 90° 正交、无近大远小；两张对得上、都没人没字没标注；没有反打／第三张／场景档案（R86）",
     "三类资产是否只交了提示词与槽号，没有图片文件、路径或「已出图」说法（R30）",
     "分镜视频（R71）有没有先问一句：分镜两件确认后，用户说要才写 `分镜视频.md`；说不要就停在分镜，没写「待补」",
@@ -2223,7 +2074,7 @@ def report(fails, warns, notes, info, _unused, segs):
         if info.get("assets"):
             print("资产编号已定义 %d 条（C／S／P）" % info["assets"])
         if info.get("char_ids"):
-            print("人物资产：角色=%s 个（四张，拆三文件）" % info["char_ids"])
+            print("人物资产：角色=%s 个（仅 Cxx 编号与身份清单；人物提示词待重设）" % info["char_ids"])
         if notes.get("portrait_ids") is not None:
             print("人物立绘：%s 个角色（每角色一张全身立绘）" % notes["portrait_ids"])
         if notes.get("small_act") is not None:
