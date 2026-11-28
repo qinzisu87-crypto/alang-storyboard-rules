@@ -1598,6 +1598,62 @@ def parse_shot_table(text):
     return rows
 
 
+SMALL_ACT = ("抬手", "抬臂", "抬腕", "伸手", "探手", "递过", "接过", "拿起", "放下",
+             "按剑", "按住", "扣紧", "扶住", "扶袖", "翻开", "低头", "抬头", "点头", "摇头",
+             "转身", "起身", "坐下", "迈步", "跨步", "退半步", "上前半步", "换重心",
+             "整理衣", "拂袖", "推门", "拉门", "举杯", "端起", "屈膝", "俯身", "直起身")
+FIGHT_W = ("打斗", "交锋", "格挡", "劈", "斩", "挥剑", "出拳", "踢", "闪避", "翻滚", "腾空",
+           "冲刺", "撞击", "兵器", "血")
+SEC_RE = re.compile(r"(\d+)\s*[–\-—~至]\s*(\d+)\s*s[：:]")
+
+
+def split_seconds(desc):
+    """把列5 逐秒指令切成 [(起, 止, 文本)]；认「0–1s：」这种写法。"""
+    marks = list(SEC_RE.finditer(desc))
+    if not marks:
+        return []
+    out = []
+    for i, m in enumerate(marks):
+        end = marks[i + 1].start() if i + 1 < len(marks) else len(desc)
+        out.append((int(m.group(1)), int(m.group(2)), desc[m.end():end]))
+    return out
+
+
+def check_small_action(rows, fails, warns):
+    """R81：非台词、非打斗的普通小动作在镜内只占 1–2 秒——连续 4 个及以上秒格写小动作即 FAIL，3 格 WARN。"""
+    n_fail = 0
+    for r in rows:
+        dlg = r.get("audio", "") or ""
+        has_dlg = bool(re.search(r"对白\s*[：:]\s*(?!无)", dlg))
+        fight = any(w in (r.get("desc", "") + r.get("anchors", "")) for w in FIGHT_W)
+        if has_dlg or fight:
+            continue
+        secs = split_seconds(r.get("desc", "") or "")
+        run, start = 0, None
+        for (s, e, txt) in secs:
+            if any(w in txt for w in SMALL_ACT):
+                if run == 0:
+                    start = s
+                run += 1
+            else:
+                if run >= 3:
+                    msg = "镜 %s 的小动作从 %ss 起连占 %d 秒（R81：非台词非打斗的小动作只给 1–2 秒，第 3 秒起改成停顿／情绪／视线／环境）" % (r["id"], start, run)
+                    if run >= 4:
+                        fails.append(msg)
+                        n_fail += 1
+                    else:
+                        warns.append(msg)
+                run = 0
+        if run >= 3:
+            msg = "镜 %s 的小动作从 %ss 起连占 %d 秒（R81：非台词非打斗的小动作只给 1–2 秒）" % (r["id"], start, run)
+            if run >= 4:
+                fails.append(msg)
+                n_fail += 1
+            else:
+                warns.append(msg)
+    return n_fail
+
+
 def check_shot_table(board_txt, rows, story_txt, script_txt, fails, warns, notes):
     """R70：六列齐、六项自检、逐秒覆盖、钩子密度、锚卡四子字段、台词只在列6。"""
     if not rows:
@@ -1816,6 +1872,8 @@ def main():
             fails.append("分镜/镜头表.md 未找到镜头行（每行应为「| 镜 1-1 / 6s | … |」，六列，R70.2）")
         warns.append("分镜按 R70 六列镜头表＋文本分镜校验；旧格式（九栏体／陈述句体）已删除，不再读取")
         check_shot_table(board_txt, rows, story_txt, script_txt, fails, warns, notes)
+    if rows:
+        notes["small_act"] = check_small_action(rows, fails, warns)
 
         class _M(object):
             def __init__(self, v):
@@ -2096,6 +2154,7 @@ def main():
 HUMAN = [
     "每镜「拍摄手法」是否每条都带理由（略仰＝被压、略俯＝看手、平视＝同行）",
     "每镜列5 逐秒是否一秒一条、五要素齐（人物动作／身体部位／接触点／方向／镜头），没有两件事挤在同一秒",
+    "非台词、非打斗镜头里，抬手／递物／转身这类普通小动作是否只占镜内 1–2 秒，第 3 秒起换成停顿／情绪／视线／环境；镜长仍 4–10 秒（R81）",
     "「表情」是否先有情绪定调（什么情绪、几成、对着谁），再写眉·眼·鼻·嘴·颈·手的执行清单",
     "轴线：同一场是否只在一侧工作，画左画右站位是否全场不变，机位有没有越轴",
     "每场「场景站位」的锚点是否都在本场景里真实存在且不动，剧本与分镜同锚点同编号（R26）",
@@ -2139,6 +2198,8 @@ def report(fails, warns, notes, info, _unused, segs):
             print("人物资产：角色=%s 个（四张，拆三文件）" % info["char_ids"])
         if notes.get("portrait_ids") is not None:
             print("人物立绘：%s 个角色（每角色一张全身立绘）" % notes["portrait_ids"])
+        if notes.get("small_act") is not None:
+            print("小动作节拍：%s 处超 1–2 秒（R81，FAIL 计）" % notes["small_act"])
         if info.get("scene_ids"):
             print("场景资产：%s 个场景（每场景三张：俯视图／正打／反打，默认 16:9）" % info["scene_ids"])
         if notes.get("prop_ids") is not None:
