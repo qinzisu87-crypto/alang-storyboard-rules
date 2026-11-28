@@ -1654,6 +1654,27 @@ def check_small_action(rows, fails, warns):
     return n_fail
 
 
+def check_lens_sentence(rows, warns):
+    """R82：列5 的景别段不许只写镜头名——没有画面锚点（画左／画右／前景／占画面…）的镜聚合成一条 WARN。"""
+    anchors = ("画左", "画右", "前景", "背景", "占画面", "入画", "压在", "铺满", "居中",
+               "画面下", "画面上", "虚在", "贴着画面", "填满")
+    bad = []
+    for r in rows:
+        desc = r.get("desc", "") or ""
+        m = re.search(r"景别\s*[：:]\s*(.*?)(?:[；;]|$)", desc)
+        if not m:
+            continue
+        seg = m.group(1).strip()
+        if not any(a in seg for a in anchors):
+            bad.append(r["id"])
+    if bad:
+        shown = "、".join("镜 %s" % x for x in bad[:6])
+        more = "" if len(bad) <= 6 else " 等 %d 镜" % len(bad)
+        warns.append("%d 镜列5 只写了镜头名、没有画面句（R82：照 `references/短剧镜头全典.md` 的「画面是什么样」写到这一场这一镜）：%s%s"
+                     % (len(bad), shown, more))
+    return len(bad)
+
+
 def check_shot_table(board_txt, rows, story_txt, script_txt, fails, warns, notes):
     """R70：六列齐、六项自检、逐秒覆盖、钩子密度、锚卡四子字段、台词只在列6。"""
     if not rows:
@@ -1874,6 +1895,7 @@ def main():
         check_shot_table(board_txt, rows, story_txt, script_txt, fails, warns, notes)
     if rows:
         notes["small_act"] = check_small_action(rows, fails, warns)
+        notes["bare_lens"] = check_lens_sentence(rows, warns)
 
         class _M(object):
             def __init__(self, v):
@@ -2155,6 +2177,7 @@ HUMAN = [
     "每镜「拍摄手法」是否每条都带理由（略仰＝被压、略俯＝看手、平视＝同行）",
     "每镜列5 逐秒是否一秒一条、五要素齐（人物动作／身体部位／接触点／方向／镜头），没有两件事挤在同一秒",
     "非台词、非打斗镜头里，抬手／递物／转身这类普通小动作是否只占镜内 1–2 秒，第 3 秒起换成停顿／情绪／视线／环境；镜长仍 4–10 秒（R81）",
+    "每镜列5 景别段是否写成了「景别＋这一镜画面」——谁在画左画右、前景压什么、看得见什么；只写镜头名算没写完（R82）",
     "「表情」是否先有情绪定调（什么情绪、几成、对着谁），再写眉·眼·鼻·嘴·颈·手的执行清单",
     "轴线：同一场是否只在一侧工作，画左画右站位是否全场不变，机位有没有越轴",
     "每场「场景站位」的锚点是否都在本场景里真实存在且不动，剧本与分镜同锚点同编号（R26）",
@@ -2200,6 +2223,8 @@ def report(fails, warns, notes, info, _unused, segs):
             print("人物立绘：%s 个角色（每角色一张全身立绘）" % notes["portrait_ids"])
         if notes.get("small_act") is not None:
             print("小动作节拍：%s 处超 1–2 秒（R81，FAIL 计）" % notes["small_act"])
+        if notes.get("bare_lens") is not None:
+            print("镜头画面句：%s 镜只写了镜头名（R82，WARN）" % notes["bare_lens"])
         if info.get("scene_ids"):
             print("场景资产：%s 个场景（每场景三张：俯视图／正打／反打，默认 16:9）" % info["scene_ids"])
         if notes.get("prop_ids") is not None:
