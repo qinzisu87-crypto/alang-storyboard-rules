@@ -589,15 +589,19 @@ def check_standing(blocks, source, defined, fails, warns, anchors):
 RE_CHAR_BLOCK = re.compile(r"^##\s+(C\d{2})\s*(?:｜|\|)?\s*(.+)$", re.M)
 RE_CHAR_CHOICE = re.compile(r"本集选择[：:]\s*(\S+)", re.M)
 def check_char_assets(txt, fails, warns, files=None):
-    """人物提示词口径自 2026-11-28 整条删除（原 R28／R74／R75／R80，待重设）。
-    本轮人物资产只认清单：每个角色一段 `## Cxx 名字` 加一句身份；不写提示词、不写图槽。"""
+    """R28（2026-11-28 重设）：人物资产每角色固定三张提示词——正脸（面部资产图）／
+    综合人物资产图（16:9 左35%头像到肩＋右65%正面全身与背面全身）／身体三视图（16:9 正/侧/背三具无头身形）。"""
     if "本集选择" in txt or "### A 资产" in txt or "### B 资产" in txt:
-        warns.append("人物资产.md 仍是旧式 A／B 口径：旧稿不回溯；人物提示词等新规则（2026-11-28 已删）")
+        warns.append("人物资产.md 还有旧式 A／B 口径：旧稿不回溯；新稿每角色固定三节（正脸／综合人物资产图／身体三视图，R28）")
 
     blocks = list(re.finditer(r"^##\s*(C\d{2})\s*(.*)$", txt, re.M))
     if not blocks:
         fails.append("人物资产.md 没有角色段（应为「## C01 周野」）")
         return set()
+
+    SEC = [("正脸", ("正脸", "面部资产图", "面部特写")),
+           ("综合人物资产图", ("综合人物资产图", "Character Design Reference Sheet")),
+           ("身体三视图", ("身体三视图", "Body Turnaround"))]
 
     ids = set()
     for i2, b in enumerate(blocks):
@@ -607,8 +611,39 @@ def check_char_assets(txt, fails, warns, files=None):
             fails.append("%s 没写中文名（应为「## C01 周野」）" % cid)
         end = blocks[i2 + 1].start() if i2 + 1 < len(blocks) else len(txt)
         body = txt[b.end():end]
-        if "提示词" in body or "@图片" in body:
-            warns.append("%s 里写了「提示词」或图槽：人物提示词口径已整条删除（待重设），新规则下来前不写提示词" % cid)
+        heads = list(re.finditer(r"^#{3,4}\s*(.*)$", body, re.M))
+        got = {}
+        for k, h in enumerate(heads):
+            name = h.group(1).strip()
+            he = heads[k + 1].start() if k + 1 < len(heads) else len(body)
+            seg = body[h.end():he]
+            for key, aliases in SEC:
+                if any(a in name for a in aliases) and key not in got:
+                    got[key] = seg
+        for key, _ in SEC:
+            if key not in got:
+                fails.append("%s 缺「#### %s」一节（每角色固定三节：正脸／综合人物资产图／身体三视图，R28）" % (cid, key))
+                continue
+            seg = got[key]
+            if "提示词" not in seg:
+                fails.append("%s 的「%s」没写「提示词：」（R28）" % (cid, key))
+            if "@图片" not in seg:
+                fails.append("%s 的「%s」没写图槽「@图片 N」（R28）" % (cid, key))
+            if key != "正脸" and "16:9" not in seg:
+                fails.append("%s 的「%s」没写 16:9 横向构图（R28）" % (cid, key))
+            if key == "正脸":
+                if "16:9" in seg:
+                    warns.append("%s 正脸写了 16:9：面部特写不规定画幅（R28）" % cid)
+                if not ("只生成头部" in seg or "只展示人物头部" in seg or "只展示头部" in seg or "不展示脖子" in seg):
+                    warns.append("%s 正脸没写「只到头顶到下巴、不展示脖子以下」的限制句（R28）" % cid)
+            if key == "身体三视图":
+                if not ("不生成头部" in seg or "脖子以上" in seg or "留白" in seg):
+                    fails.append("%s 身体三视图没写「三具都不生成头部、脖子以上留白」（R28）" % cid)
+            if key == "综合人物资产图":
+                if "35" not in seg or "65" not in seg:
+                    warns.append("%s 综合人物资产图没写左右分区比例（左 35%／右 65%，R28）" % cid)
+            if "文字" not in seg:
+                warns.append("%s 的「%s」没写「不出现文字」（R28）" % (cid, key))
     return ids
 
 
@@ -1829,7 +1864,7 @@ def main():
         notes["char_ids"] = len(cids)
         notes["char_choice"] = "—"
     elif char_card_p.is_file() or char_body_p.is_file() or char_pt_p.is_file():
-        warns.append("人物资产还是旧的三份文件（设定卡／面部与服装／立绘）：人物提示词口径已整条删除（2026-11-28，待重设），新规则下来后只交 `人物资产.md` 的角色清单；旧稿不回溯")
+        warns.append("人物资产还是旧的三份文件（设定卡／面部与服装／立绘）：旧稿不回溯；新稿每角色固定三节——正脸／综合人物资产图／身体三视图（R28）")
         for p2 in (char_card_p, char_body_p, char_pt_p):
             if p2.is_file():
                 char_texts[p2.name] = read_text(p2)
@@ -2074,7 +2109,7 @@ def report(fails, warns, notes, info, _unused, segs):
         if info.get("assets"):
             print("资产编号已定义 %d 条（C／S／P）" % info["assets"])
         if info.get("char_ids"):
-            print("人物资产：角色=%s 个（仅 Cxx 编号与身份清单；人物提示词待重设）" % info["char_ids"])
+            print("人物资产：角色=%s 个（每角色三张：正脸＋综合人物资产图＋身体三视图，R28）" % info["char_ids"])
         if notes.get("portrait_ids") is not None:
             print("人物立绘：%s 个角色（每角色一张全身立绘）" % notes["portrait_ids"])
         if notes.get("small_act") is not None:
