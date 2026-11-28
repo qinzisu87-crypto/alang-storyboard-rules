@@ -587,13 +587,13 @@ def check_standing(blocks, source, defined, fails, warns, anchors):
 
 RE_CHAR_BLOCK = re.compile(r"^##\s+(C\d{2})\s*(?:｜|\|)?\s*(.+)$", re.M)
 RE_CHAR_CHOICE = re.compile(r"本集选择[：:]\s*(\S+)", re.M)
-A_ITEMS = ["面部特写", "正面", "侧面", "背面"]
+A_ITEMS = ["人物设定卡", "面部半身特写", "服装三视图"]
 LEGACY_A_NAMES = ("三视图", "面部特征", "服装结构", "发型与配饰", "身体比例")
 
 
 def check_char_assets(txt, fails, warns):
-    """R28：人物资产只有四项（面部特写／正面／侧面／背面），不分 A／B 层、不写本集选择；
-    每条须是可粘提示词并带图槽；旧式 A／B 分层与 A1–A5 只提醒不判失败（不回溯）。"""
+    """R28／R74：人物资产只有三张（人物设定卡／面部半身特写／服装三视图），不分 A／B 层、不写本集选择；
+    每条须是可粘提示词并带图槽；旧式 A／B 分层、五项与旧四项 A1–A4 只提醒不判失败（不回溯）。"""
     blocks = list(RE_CHAR_BLOCK.finditer(txt))
     if not blocks:
         fails.append("人物资产.md 没有角色段（应为「## C01 周野」）（R28）")
@@ -602,7 +602,7 @@ def check_char_assets(txt, fails, warns):
     ids = {b.group(1) for b in blocks}
     if RE_CHAR_CHOICE.search(txt) or "### A 资产" in txt or "### B 资产" in txt:
         warns.append("人物资产.md 仍是旧式 A／B 分层（`本集选择` 或 `### A 资产`／`### B 资产`）；"
-                     "新口径只出四项提示词（面部特写／正面／侧面／背面），不分层、不写选择行。"
+                     "新口径只出三张提示词（人物设定卡／面部半身特写／服装三视图），不分层、不写选择行。"
                      "旧资产按不回溯保留，下次重出该角色时改四项（R28）")
         return ids
 
@@ -613,13 +613,19 @@ def check_char_assets(txt, fails, warns):
         heads = re.findall(r"^####\s*A(\d)\s*(.*)$", body, re.M)
         digits = {h[0] for h in heads}
         head_names = " ".join(h[1] for h in heads)
-        if digits == set("12345") or any(k in head_names for k in LEGACY_A_NAMES):
-            warns.append("%s 是旧式五项资产（%s）；新口径为 A1 面部特写、A2 正面、A3 侧面、A4 背面，四个图槽。"
-                         "旧资产按不回溯保留，下次重出该角色时改四项（R28）"
+        names = [h[1].strip() for h in heads]
+        is_new = digits == set("123") and len(names) == 3 and all(n in A_ITEMS for n in names)
+        if not is_new and (digits == set("12345") or any(k in head_names for k in LEGACY_A_NAMES)):
+            warns.append("%s 是旧式五项资产（%s）；新口径为 A1 人物设定卡、A2 面部半身特写、A3 服装三视图，三个图槽。"
+                         "旧资产按不回溯保留，下次重出该角色时改三张（R28／R74）"
                          % (cid, "、".join(sorted(digits))))
             continue
-        if len(heads) < 4 or digits != set("1234"):
-            fails.append("%s 的小节应为 A1–A4 四项（面部特写／正面／侧面／背面），当前是 %s（R28）"
+        if not is_new and digits == set("1234"):
+            warns.append("%s 是旧式四项资产（面部特写／正面／侧面／背面）；新口径为 A1 人物设定卡、A2 面部半身特写、A3 服装三视图，三个图槽。"
+                         "旧资产按不回溯保留，下次重出该角色时改三张（R28／R74）" % cid)
+            continue
+        if len(heads) < 3 or digits != set("123"):
+            fails.append("%s 的小节应为 A1–A3 三张（人物设定卡／面部半身特写／服装三视图），当前是 %s（R28／R74）"
                          % (cid, "、".join(sorted(digits)) or "无"))
         for kw in A_ITEMS:
             if kw not in body:
@@ -1927,7 +1933,7 @@ HUMAN = [
     "轴线：同一场是否只在一侧工作，画左画右站位是否全场不变，机位有没有越轴",
     "每场「场景站位」的锚点是否都在本场景里真实存在且不动，剧本与分镜同锚点同编号（R26）",
     "剧本、分镜里的 @C／@S／@P 是否都能在资产提示词.md 找到，编号跨集不重排，三节提示词能直接粘去文生图（R27）",
-    "人物资产是否只写了四项（面部特写／正面／侧面／背面）、不分层、不写本集选择行（R28）",
+    "人物资产是否只写了三张（人物设定卡／面部半身特写／服装三视图）、不分层、不写本集选择行（R28／R74）",
     "场景资产是否只出了用户点的那层，每条是否可粘提示词带图槽（R29）",
     "三类资产是否只交了提示词与槽号，没有图片文件、路径或「已出图」说法（R30）",
     "分镜视频（R71）有没有先问一句：分镜两件确认后，用户说要才写 `分镜视频.md`；说不要就停在分镜，没写「待补」",
@@ -1963,7 +1969,7 @@ def report(fails, warns, notes, info, _unused, segs):
         if info.get("assets"):
             print("资产编号已定义 %d 条（C／S／P）" % info["assets"])
         if info.get("char_ids"):
-            print("人物资产：角色=%s 个（四项，不分层）" % info["char_ids"])
+            print("人物资产：角色=%s 个（三张，不分层）" % info["char_ids"])
         if info.get("scene_ids"):
             print("场景资产：选择=%s，场景=%s 个" % (info.get("scene_choice"), info["scene_ids"]))
         if info.get("style"):
