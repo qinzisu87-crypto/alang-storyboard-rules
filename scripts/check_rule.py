@@ -777,6 +777,41 @@ def check_scene_assets(txt, fails, warns):
     return ids
 
 
+def check_prop_assets(txt, fails, warns):
+    """R78（2026-11-28）：道具资产每件只出一张「道具资产图」——单件完整入画、默认纯白无缝背景；
+    不再分 A／B、不写本集选择。每件一段 ## Pxx，只有一条「提示词：… 图槽：@图片 N」。"""
+    if "本集选择" in txt or "### A 资产" in txt or "### B 资产" in txt:
+        warns.append("道具资产.md 仍是旧式 A／B 口径（本集选择／A 资产／B 资产）：R78 起每件只出一张白底道具资产图，旧稿不回溯")
+
+    blocks = list(re.finditer(r"^##\s*(P\d{2})\s*(.*)$", txt, re.M))
+    if not blocks:
+        fails.append("道具资产.md 没有道具段（应为「## P01 旧剑」）（R41／R78）")
+        return set()
+
+    ids = set()
+    for i, b in enumerate(blocks):
+        pid, name = b.group(1), b.group(2).strip()
+        ids.add(pid)
+        end = blocks[i + 1].start() if i + 1 < len(blocks) else len(txt)
+        body = txt[b.end():end]
+        prompts = [l.strip() for l in body.splitlines()
+                   if l.strip().startswith("-") and "提示词" in l]
+        if not prompts:
+            fails.append("%s 缺一条「提示词：」（R78：每件一张白底道具资产图）" % pid)
+            continue
+        if len(prompts) > 1:
+            fails.append("%s 写了 %d 条提示词：R78 起每件只出一张「道具资产图」，三视图／局部细节／材质板／握持交互／多状态并列一律不出"
+                         % (pid, len(prompts)))
+        for l in prompts:
+            if not SLOT.search(l):
+                fails.append("%s 的提示词没写「图槽：@图片 N」：%s" % (pid, l[:36]))
+            if not re.search(r"纯白|白底|白色无缝|seamless pure white|white seamless", l):
+                warns.append("%s 的提示词没写默认「纯白无缝背景」：R78 默认白底，用户指定别的底色才改（%s）" % (pid, l[:26]))
+            if not re.search(r"单件|完整入画|无手|无遮挡", l):
+                warns.append("%s 的提示词没写明「单件完整入画／无手／无遮挡」：R78 一张图要把整件说全（%s）" % (pid, l[:26]))
+    return ids
+
+
 STYLE_DECL = re.compile(r"参考画风[：:]\s*(REF-\d{3})")
 STYLE_DECL_OLD = re.compile(r"画风[：:]\s*(REF-\d{3})")
 # R72 口径的声明行：`画风：REF-900 冰蓝仙侠·三维写实（纯文字口径）`
@@ -1668,6 +1703,7 @@ def main():
     char_card_p = ep_dir / "人物资产-设定卡.md"
     char_body_p = ep_dir / "人物资产-面部与服装.md"
     scene_p = ep_dir / "场景资产.md"
+    prop_p = ep_dir / "道具资产.md"
     legacy_board = ep_dir / "分镜.md"
     if legacy_board.is_file() and not table_mode:
         fails.append("分镜层还是旧 `分镜.md`（九栏体／陈述句体，原 R68）：旧格式已删除，按 R70 重写成 `分镜/镜头表.md`＋`分镜/文本分镜.md`")
@@ -1829,12 +1865,20 @@ def main():
         sm2 = RE_CHAR_CHOICE.search(scene_txt)
         notes["scene_choice"] = "三图" if not sm2 else sm2.group(1).strip().upper()
 
+    if prop_p.is_file():
+        prop_txt = read_text(prop_p)
+        pids = check_prop_assets(prop_txt, fails, warns)
+        check_prompt_terms(prop_txt, "道具资产.md", fails)
+        notes["prop_ids"] = len(pids)
+
     # ---------- 画风（R31／R64 参考画风） ----------
     texts = {"资产提示词.md": asset_txt}
     for n3, tx3 in char_texts.items():
         texts[n3] = tx3
     if scene_p.is_file():
         texts["场景资产.md"] = read_text(scene_p)
+    if prop_p.is_file():
+        texts["道具资产.md"] = read_text(prop_p)
     style = "" if args.reverse else check_style(texts, fails, warns)
     if style:
         notes["style"] = style
@@ -2050,6 +2094,8 @@ def report(fails, warns, notes, info, _unused, segs):
             print("人物资产：角色=%s 个（三张，拆两文件）" % info["char_ids"])
         if info.get("scene_ids"):
             print("场景资产：%s 个场景（每场景三张：俯视图／正打／反打，默认 16:9）" % info["scene_ids"])
+        if notes.get("prop_ids") is not None:
+            print("道具资产：%s 件（每件一张白底道具资产图）" % notes["prop_ids"])
         if info.get("style"):
             print("参考画风：%s（只作质感参考，形象按剧情）" % info["style"])
         if notes.get("style_text"):
@@ -2098,4 +2144,5 @@ def report(fails, warns, notes, info, _unused, segs):
 
 if __name__ == "__main__":
     sys.exit(main())
+
 
