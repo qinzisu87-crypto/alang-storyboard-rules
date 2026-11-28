@@ -1591,8 +1591,8 @@ def check_shot_table(board_txt, rows, story_txt, script_txt, fails, warns, notes
                          % (win[0]["id"], win[2]["id"]))
     short_sec = []
     for r in rows:
-        if not (4 <= r["dur"] <= 15):
-            fails.append("镜 %s 镜长 %d 秒不在 4–15 整数（R17／R63）" % (r["id"], r["dur"]))
+        if not (4 <= r["dur"] <= 10):
+            fails.append("镜 %s 镜长 %d 秒超出 4–10 秒硬区间（R79：最短 4 秒、最长 10 秒）" % (r["id"], r["dur"]))
         cnt = len(RE_CELL_TC.findall(r["desc"]))
         if cnt < r["dur"]:
             short_sec.append((r["id"], cnt, r["dur"]))
@@ -1949,8 +1949,8 @@ def main():
         if declared is None:
             fails.append("%s 段标题没写整数秒段长（R71.7）" % where)
         else:
-            if not (4 <= declared <= 15):
-                fails.append("%s 段长 %d 秒不在 4–15 区间（R71.7）" % (where, declared))
+            if not (4 <= declared <= 10):
+                fails.append("%s 段长 %d 秒超出 4–10 秒硬区间（R79／R63：段长＝镜长）" % (where, declared))
             seg_durs.append(declared)
         check_slots(f.get("参考图", "") + "\n" + g["body"], where, fails, notes)
         landing = f.get("说话人", "").strip()
@@ -2144,5 +2144,6 @@ def report(fails, warns, notes, info, _unused, segs):
 
 if __name__ == "__main__":
     sys.exit(main())
+
 
 
