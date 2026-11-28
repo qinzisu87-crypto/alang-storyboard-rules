@@ -821,8 +821,9 @@ def check_line_order(field, where, label, fails):
 def check_style(texts, fails, warns):
     """R64（2026-11-26 起）：画风由「锁」改成「参考」——参考图只给质感／配色／材质／打光，
     形象一律按剧情写，不符就以剧情为准。
-    允许一集最多两套参考：人物一套（REF-900 默认／REF-001 用户图／REF-000 文字），
-    场景与道具默认与人物同一套 REF-900（R73 起 REF-902 已删除），用户另给才记 REF-002。
+    允许一集最多两套参考：人物一套（REF-900 或 REF-901 两套默认之一／REF-001 用户图／REF-000 文字），
+    场景与道具默认与人物同一套（900 或 901，R76），两个默认号同时出现即 FAIL；
+    REF-902 已删除（R73），用户另给场景道具才记 REF-002。
     人物资产.md 用人物号；场景资产.md 用场景道具号；资产提示词.md 按小节分别对号；
     每条带「提示词」的条目都要写 `参考画风 REF-xxx`（可后跟一句取舍说明），编号与本层对号，
     并且提示词里要写到本剧形象；旧的 `画风：REF-…` / `画风 按 REF-…：` 按不回溯只提醒。"""
@@ -852,13 +853,13 @@ def check_style(texts, fails, warns):
                      % "、".join("%s 写「画风：%s」" % (n, "、".join(c)) for n, c in legacy.items()))
         decls = legacy
     if not decls:
-        fails.append("三份资产文件都没有画风声明：人物写「画风：REF-900 冰蓝仙侠·三维写实（纯文字口径）」，场景道具写「画风：同人物（REF-900）」，再各写一行「画风文字：…」与「本剧形象：…」（R31／R64／R72／R73）")
+        fails.append("三份资产文件都没有画风声明：人物写「画风：REF-900 冰蓝仙侠·三维写实（纯文字口径）」（或 REF-901 冰蓝仙侠·灰底设定卡），场景道具写「画风：同人物（900／901）」，再各写一行「画风文字：…」与「本剧形象：…」（R31／R64／R72／R73）")
         return ""
 
     all_codes = sorted({c for cs in decls.values() for c in cs})
     stale = [n for n, txt in texts.items() if "REF-902" in txt]
     if stale:
-        warns.append("出现已删除的旧号 REF-902（%s）：R73 起场景与道具默认同人物 REF-900，改成 REF-900 或删句（旧稿不回溯）"
+        warns.append("出现已删除的旧号 REF-902（%s）：R73 起场景与道具默认同人物那一套，改成 REF-900 或 REF-901（旧稿不回溯）"
                      % "、".join(stale))
     if len(all_codes) > 2:
         fails.append("参考画风超过两套：%s（一集最多「人物一套＋场景道具一套」，R64）"
@@ -869,10 +870,14 @@ def check_style(texts, fails, warns):
         if name in decls and name not in legacy and not re.search(r"^.*本剧形象[：:]", txt, re.M):
             fails.append("%s 缺「本剧形象：…」一行：参考画风只给质感，形象必须按剧情写（R64）" % name)
 
-    # 人物号：REF-900 是内置默认人物号，出现时优先；否则取用户另给的编号。
-    # 场景道具号：R73 起默认与人物同一套 REF-900；用户另给场景道具参考才记 REF-002。
-    if "REF-900" in all_codes:
-        char_code = "REF-900"
+    # 人物号：R76 起两套内置默认并列（REF-900 三维写实／REF-901 灰底设定卡），
+    # 一集只认其中一套，两个默认号同时出现即判失败；否则取用户另给的编号。
+    # 场景道具号：R73／R76 默认与人物同一套；用户另给场景道具参考才记 REF-002。
+    both_defaults = [c for c in ("REF-900", "REF-901") if c in all_codes]
+    if len(both_defaults) > 1:
+        fails.append("两个默认画风号同时出现（REF-900 与 REF-901）：R76 起一集只用一套默认，人物与场景道具同号，把另一套整句撤掉")
+    if both_defaults:
+        char_code = both_defaults[0]
     else:
         char_code = next((c for c in all_codes if c != "REF-002"), all_codes[0])
     scene_code = "REF-002" if "REF-002" in all_codes else char_code
