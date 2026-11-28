@@ -1601,6 +1601,7 @@ def parse_shot_table(text):
 SMALL_ACT = ("抬手", "抬臂", "抬腕", "伸手", "探手", "递过", "接过", "拿起", "放下",
              "按剑", "按住", "扣紧", "扶住", "扶袖", "翻开", "低头", "抬头", "点头", "摇头",
              "转身", "起身", "坐下", "迈步", "跨步", "退半步", "上前半步", "换重心",
+             "走进", "走入", "进门", "放到", "落桌", "敲", "按在", "起身离座",
              "整理衣", "拂袖", "推门", "拉门", "举杯", "端起", "屈膝", "俯身", "直起身")
 FIGHT_W = ("打斗", "交锋", "格挡", "劈", "斩", "挥剑", "出拳", "踢", "闪避", "翻滚", "腾空",
            "冲刺", "撞击", "兵器", "血")
@@ -1620,7 +1621,8 @@ def split_seconds(desc):
 
 
 def check_small_action(rows, fails, warns):
-    """R81：非台词、非打斗的普通小动作在镜内只占 1–2 秒——连续 4 个及以上秒格写小动作即 FAIL，3 格 WARN。"""
+    """R81／R83：孤立小动作只占 1–2 秒；连续动作链（≥3 个不同动作首尾相接、完成一件事）可给 4 秒。
+    同一动作占 ≥4 格 FAIL，3 格 WARN；动作链放行。"""
     n_fail = 0
     for r in rows:
         dlg = r.get("audio", "") or ""
@@ -1628,30 +1630,41 @@ def check_small_action(rows, fails, warns):
         fight = any(w in (r.get("desc", "") + r.get("anchors", "")) for w in FIGHT_W)
         if has_dlg or fight:
             continue
-        secs = split_seconds(r.get("desc", "") or "")
-        run, start = 0, None
-        for (s, e, txt) in secs:
-            if any(w in txt for w in SMALL_ACT):
+        run, start, hits = 0, None, []
+        for (s2, e2, txt) in split_seconds(r.get("desc", "") or ""):
+            hit = [w for w in SMALL_ACT if w in txt]
+            if hit:
                 if run == 0:
-                    start = s
+                    start = s2
                 run += 1
+                hits.append(hit)
             else:
                 if run >= 3:
-                    msg = "镜 %s 的小动作从 %ss 起连占 %d 秒（R81：非台词非打斗的小动作只给 1–2 秒，第 3 秒起改成停顿／情绪／视线／环境）" % (r["id"], start, run)
-                    if run >= 4:
-                        fails.append(msg)
-                        n_fail += 1
-                    else:
-                        warns.append(msg)
-                run = 0
+                    n_fail += _judge_run(r["id"], start, run, hits, fails, warns)
+                run, hits = 0, []
         if run >= 3:
-            msg = "镜 %s 的小动作从 %ss 起连占 %d 秒（R81：非台词非打斗的小动作只给 1–2 秒）" % (r["id"], start, run)
-            if run >= 4:
-                fails.append(msg)
-                n_fail += 1
-            else:
-                warns.append(msg)
+            n_fail += _judge_run(r["id"], start, run, hits, fails, warns)
     return n_fail
+
+
+def _judge_run(rid, start, run, hits, fails, warns):
+    """≥3 连续秒格写小动作：每个新格都在推进新动作（≥3 种、任一种不重复 ≥3 格）＝动作链，放行（R83）；否则按 R81 判。"""
+    words = set()
+    freq = {}
+    for h in hits:
+        words |= set(h)
+        for w in h:
+            freq[w] = freq.get(w, 0) + 1
+    top = max(freq.values()) if freq else 0
+    if len(words) >= 3 and top < 3:
+        return 0
+    msg = ("镜 %s 的同一类小动作从 %ss 起连占 %d 秒（R81：孤立小动作只给 1–2 秒；"
+           "连续动作链要每格推进新动作、至少 3 个不同动作，才算 R83 可给 4 秒）" % (rid, start, run))
+    if run >= 4:
+        fails.append(msg)
+        return 1
+    warns.append(msg)
+    return 0
 
 
 def check_lens_sentence(rows, warns):
@@ -2177,6 +2190,7 @@ HUMAN = [
     "每镜「拍摄手法」是否每条都带理由（略仰＝被压、略俯＝看手、平视＝同行）",
     "每镜列5 逐秒是否一秒一条、五要素齐（人物动作／身体部位／接触点／方向／镜头），没有两件事挤在同一秒",
     "非台词、非打斗镜头里，抬手／递物／转身这类普通小动作是否只占镜内 1–2 秒，第 3 秒起换成停顿／情绪／视线／环境；镜长仍 4–10 秒（R81）",
+    "连续动作链（走进来→坐下→手放桌上→指节敲桌）是否作为一条链给到 4 秒，链尾收在完成态；孤立小动作仍 1–2 秒（R83）",
     "每镜列5 景别段是否写成了「景别＋这一镜画面」——谁在画左画右、前景压什么、看得见什么；只写镜头名算没写完（R82）",
     "「表情」是否先有情绪定调（什么情绪、几成、对着谁），再写眉·眼·鼻·嘴·颈·手的执行清单",
     "轴线：同一场是否只在一侧工作，画左画右站位是否全场不变，机位有没有越轴",
