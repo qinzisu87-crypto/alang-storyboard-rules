@@ -720,6 +720,8 @@ STYLE_DECL = re.compile(r"参考画风[：:]\s*(REF-\d{3})")
 STYLE_DECL_OLD = re.compile(r"画风[：:]\s*(REF-\d{3})")
 # R72 口径的声明行：`画风：REF-900 冰蓝仙侠·三维写实（纯文字口径）`
 STYLE_DECL_TEXT = re.compile(r"画风[：:]\s*(REF-\d{3})[^（(\n]{0,40}[（(]纯文字")
+# R73：场景与道具默认同人物，头行可写「画风：同人物（REF-900）」
+STYLE_DECL_SAME = re.compile(r"画风[：:]\s*同人物[（(]\s*(REF-\d{3})")
 STYLE_TAIL = re.compile(r"参考画风\s*(?:按)?\s*(REF-\d{3})")
 STYLE_TAIL_OLD = re.compile(r"画风\s*按\s*(REF-\d{3})\s*[：:]")
 STYLE_ANY = re.compile(r"(REF-\d{3})")
@@ -750,8 +752,8 @@ def check_line_order(field, where, label, fails):
 def check_style(texts, fails, warns):
     """R64（2026-11-26 起）：画风由「锁」改成「参考」——参考图只给质感／配色／材质／打光，
     形象一律按剧情写，不符就以剧情为准。
-    允许一集两套参考：人物一套（REF-900 默认／REF-001 用户图／REF-000 文字），
-    场景与道具一套（REF-902 默认／REF-002 用户给，可沿用人物号）。
+    允许一集最多两套参考：人物一套（REF-900 默认／REF-001 用户图／REF-000 文字），
+    场景与道具默认与人物同一套 REF-900（R73 起 REF-902 已删除），用户另给才记 REF-002。
     人物资产.md 用人物号；场景资产.md 用场景道具号；资产提示词.md 按小节分别对号；
     每条带「提示词」的条目都要写 `参考画风 REF-xxx`（可后跟一句取舍说明），编号与本层对号，
     并且提示词里要写到本剧形象；旧的 `画风：REF-…` / `画风 按 REF-…：` 按不回溯只提醒。"""
@@ -762,6 +764,9 @@ def check_style(texts, fails, warns):
         cs = sorted(set(STYLE_DECL.findall(txt)))
         if cs:
             return cs
+        same = sorted(set(STYLE_DECL_SAME.findall(txt)))
+        if same:
+            return same
         return sorted(set(STYLE_DECL_TEXT.findall(txt)))
 
     decls, legacy = {}, {}
@@ -778,10 +783,14 @@ def check_style(texts, fails, warns):
                      % "、".join("%s 写「画风：%s」" % (n, "、".join(c)) for n, c in legacy.items()))
         decls = legacy
     if not decls:
-        fails.append("三份资产文件都没有画风声明：人物写「参考画风：REF-900 冰蓝仙侠·三维写实（参考，不照搬）」，场景道具写「参考画风：REF-902 雨雾仙侠·实景质感（参考，不照搬）」，再各写一行「本剧形象：…」（R31／R64）")
+        fails.append("三份资产文件都没有画风声明：人物写「画风：REF-900 冰蓝仙侠·三维写实（纯文字口径）」，场景道具写「画风：同人物（REF-900）」，再各写一行「画风文字：…」与「本剧形象：…」（R31／R64／R72／R73）")
         return ""
 
     all_codes = sorted({c for cs in decls.values() for c in cs})
+    stale = [n for n, txt in texts.items() if "REF-902" in txt]
+    if stale:
+        warns.append("出现已删除的旧号 REF-902（%s）：R73 起场景与道具默认同人物 REF-900，改成 REF-900 或删句（旧稿不回溯）"
+                     % "、".join(stale))
     if len(all_codes) > 2:
         fails.append("参考画风超过两套：%s（一集最多「人物一套＋场景道具一套」，R64）"
                      % "、".join(all_codes))
@@ -791,16 +800,13 @@ def check_style(texts, fails, warns):
         if name in decls and name not in legacy and not re.search(r"^.*本剧形象[：:]", txt, re.M):
             fails.append("%s 缺「本剧形象：…」一行：参考画风只给质感，形象必须按剧情写（R64）" % name)
 
-    # 人物号：REF-900 是内置默认人物锁，出现时优先；否则取第一个不是 REF-902 的编号。
-    # 场景道具号：REF-902 是内置默认场景道具锁，出现时优先；否则取不同于人物号的编号。
+    # 人物号：REF-900 是内置默认人物号，出现时优先；否则取用户另给的编号。
+    # 场景道具号：R73 起默认与人物同一套 REF-900；用户另给场景道具参考才记 REF-002。
     if "REF-900" in all_codes:
         char_code = "REF-900"
     else:
-        char_code = next((c for c in all_codes if c != "REF-902"), all_codes[0])
-    if "REF-902" in all_codes:
-        scene_code = "REF-902"
-    else:
-        scene_code = next((c for c in all_codes if c != char_code), char_code)
+        char_code = next((c for c in all_codes if c != "REF-002"), all_codes[0])
+    scene_code = "REF-002" if "REF-002" in all_codes else char_code
 
     for name, cs in decls.items():
         if len(cs) > 1 and name != "资产提示词.md":
@@ -887,8 +893,9 @@ def check_style(texts, fails, warns):
         warns.append("有条目用指代代替画风（%s）：`见参考图／同上／按参考图` 在纯文本生图里等于没说（R72）"
                      % "、".join(pointer[:4]))
 
-    return "%s／%s（参考，不照搬）" % (char_code, scene_code) if len(all_codes) > 1 \
-        else "%s（参考，不照搬）" % char_code
+    if scene_code != char_code:
+        return "%s／%s（参考，不照搬）" % (char_code, scene_code)
+    return "%s（参考，不照搬）" % char_code
 
 
 def check_coverage(script_txt, board_txt, seg_txt, asset_txt, defined, fails, warns):
