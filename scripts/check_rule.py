@@ -645,6 +645,69 @@ def check_char_assets(txt, fails, warns):
     return ids
 
 
+def _char_body_map(txt):
+    """按角色号取每个 `## Cxx` 段的正文，供拆文件检查用。"""
+    blocks = list(RE_CHAR_BLOCK.finditer(txt))
+    out = {}
+    for i, b in enumerate(blocks):
+        end = blocks[i + 1].start() if i + 1 < len(blocks) else len(txt)
+        out[b.group(1)] = txt[b.end():end]
+    return out
+
+
+def check_char_assets_split(files, fails, warns):
+    """R75：人物资产拆两个文件交付。
+    `人物资产-设定卡.md` 只放 `A1 人物设定卡`；`人物资产-面部与服装.md` 放 `A2 面部半身特写`＋`A3 服装三视图`。
+    两文件各自带画风／画风文字／本剧形象头三行，角色号必须一一对上，槽号 1／2／3 跨两个文件连续。"""
+    card_name = next((n for n in files if "设定卡" in n), None)
+    body_name = next((n for n in files if "面部与服装" in n), None)
+    if card_name is None or body_name is None:
+        fails.append("人物资产必须拆两个文件：`人物资产-设定卡.md`（只 A1）＋`人物资产-面部与服装.md`（A2＋A3）（R75）")
+        return set()
+
+    maps = {n: _char_body_map(txt) for n, txt in files.items()}
+    if not maps[card_name]:
+        fails.append("%s 没有角色段（应为「## C01 周野」）（R28／R75）" % card_name)
+    if not maps[body_name]:
+        fails.append("%s 没有角色段（应为「## C01 周野」）（R28／R75）" % body_name)
+
+    a_ids, b_ids = set(maps[card_name]), set(maps[body_name])
+    for cid in sorted(a_ids ^ b_ids):
+        fails.append("%s 只出现在一个文件里：两个文件同一批角色都要有（R75）" % cid)
+
+    for name, txt in files.items():
+        if RE_CHAR_CHOICE.search(txt) or "### A 资产" in txt or "### B 资产" in txt:
+            warns.append("%s 仍是旧式 A／B 分层或 `本集选择`；新口径只出三张、拆两个文件（R28／R75）" % name)
+
+    for cid in sorted(a_ids & b_ids):
+        # 设定卡文件：只能有一节，且是 A1 人物设定卡
+        heads = re.findall(r"^####\s*A(\d)\s*(.*)$", maps[card_name][cid], re.M)
+        if len(heads) != 1 or heads[0][0] != "1" or "设定卡" not in heads[0][1]:
+            fails.append("%s 的 `%s` 应只有一节 `A1 人物设定卡`，当前是 %s（R75）"
+                         % (cid, card_name, "、".join("A%s %s" % (h[0], h[1].strip()) for h in heads) or "无"))
+        # 面部与服装文件：两节 A2／A3
+        heads2 = re.findall(r"^####\s*A(\d)\s*(.*)$", maps[body_name][cid], re.M)
+        digits2 = {h[0] for h in heads2}
+        names2 = " ".join(h[1] for h in heads2)
+        if len(heads2) != 2 or digits2 != set("23") or "面部半身特写" not in names2 or "服装三视图" not in names2:
+            fails.append("%s 的 `%s` 应为 `A2 面部半身特写`＋`A3 服装三视图` 两节，当前是 %s（R75）"
+                         % (cid, body_name, "、".join("A%s %s" % (h[0], h[1].strip()) for h in heads2) or "无"))
+        for name, body, want in ((card_name, maps[card_name][cid], "设定卡"),
+                                 (body_name, maps[body_name][cid], "面部与服装")):
+            lines = [l for l in body.splitlines() if l.strip().startswith("- ") and "｜" in l]
+            if not lines:
+                fails.append("%s 的 %s 没有任何条目（%s）" % (cid, name, want))
+            for l in lines:
+                if "提示词" not in l:
+                    fails.append("%s 的 %s 有条目没写成提示词：%s" % (cid, name, l.strip()[:36]))
+                    break
+            for l in lines:
+                if not SLOT.search(l):
+                    fails.append("%s 的 %s 有条目没写「图槽：@图片 N」：%s" % (cid, name, l.strip()[:36]))
+                    break
+    return a_ids & b_ids
+
+
 def check_scene_assets(txt, fails, warns):
     """R29：场景资产按十章出、01–04 归 A、05–10 归 B；选择与节是否对得上；
     A1–A4 齐全，A2–A4 每条是可粘提示词并带图槽（A3 的尺寸与坐标除外），B 有 B1–B6 时查关键词。"""
@@ -824,7 +887,7 @@ def check_style(texts, fails, warns):
         if name not in decls:
             fails.append("%s 缺「参考画风：REF-…」声明（R31／R64）" % name)
             continue
-        if name == "人物资产.md":
+        if name.startswith("人物资产"):
             expect = char_code
         elif name in ("场景资产.md", "道具资产.md"):
             expect = scene_code
@@ -1605,6 +1668,8 @@ def main():
         seg_is_legacy = True
     asset_p = ep_dir / "资产提示词.md"
     char_p = ep_dir / "人物资产.md"
+    char_card_p = ep_dir / "人物资产-设定卡.md"
+    char_body_p = ep_dir / "人物资产-面部与服装.md"
     scene_p = ep_dir / "场景资产.md"
     legacy_board = ep_dir / "分镜.md"
     if legacy_board.is_file() and not table_mode:
@@ -1735,8 +1800,24 @@ def main():
         check_coverage(script_txt, board_txt, seg_txt, asset_txt, defined, fails, warns)
         check_handoff(project, args.ep, fails, warns, require=args.require_handoff)
 
-    if char_p.is_file():
+    char_texts = {}
+    if char_card_p.is_file() or char_body_p.is_file():
+        for p2 in (char_card_p, char_body_p):
+            if p2.is_file():
+                char_texts[p2.name] = read_text(p2)
+        if not char_card_p.is_file():
+            fails.append("缺文件：人物资产-设定卡.md（R75 起人物资产拆两个文件，这个只放设定卡那张）")
+        if not char_body_p.is_file():
+            fails.append("缺文件：人物资产-面部与服装.md（R75：放面部半身特写＋服装三视图两张）")
+        cids = check_char_assets_split(char_texts, fails, warns)
+        for n2, tx2 in char_texts.items():
+            check_prompt_terms(tx2, n2, fails)
+        notes["char_ids"] = len(cids)
+        notes["char_choice"] = "—"
+    elif char_p.is_file():
         char_txt = read_text(char_p)
+        char_texts["人物资产.md"] = char_txt
+        warns.append("人物资产还是单个 `人物资产.md`；R75 起拆两个文件交付——`人物资产-设定卡.md` 只放 A1 设定卡那张，`人物资产-面部与服装.md` 放 A2 面部半身＋A3 服装三视图（旧单文件按不回溯保留，下一轮换两文件）")
         cids = check_char_assets(char_txt, fails, warns)
         check_prompt_terms(char_txt, "人物资产.md", fails)
         notes["char_ids"] = len(cids)
@@ -1753,8 +1834,8 @@ def main():
 
     # ---------- 画风（R31／R64 参考画风） ----------
     texts = {"资产提示词.md": asset_txt}
-    if char_p.is_file():
-        texts["人物资产.md"] = read_text(char_p)
+    for n3, tx3 in char_texts.items():
+        texts[n3] = tx3
     if scene_p.is_file():
         texts["场景资产.md"] = read_text(scene_p)
     style = "" if args.reverse else check_style(texts, fails, warns)
@@ -1933,7 +2014,7 @@ HUMAN = [
     "轴线：同一场是否只在一侧工作，画左画右站位是否全场不变，机位有没有越轴",
     "每场「场景站位」的锚点是否都在本场景里真实存在且不动，剧本与分镜同锚点同编号（R26）",
     "剧本、分镜里的 @C／@S／@P 是否都能在资产提示词.md 找到，编号跨集不重排，三节提示词能直接粘去文生图（R27）",
-    "人物资产是否只写了三张（人物设定卡／面部半身特写／服装三视图）、不分层、不写本集选择行（R28／R74）",
+    "人物资产是否只写了三张并拆成两个文件——`人物资产-设定卡.md` 只有 A1 设定卡，`人物资产-面部与服装.md` 只有 A2 面部半身＋A3 服装三视图；两个文件头三行齐、角色号一一对上、不分层、不写本集选择行（R28／R74／R75）",
     "场景资产是否只出了用户点的那层，每条是否可粘提示词带图槽（R29）",
     "三类资产是否只交了提示词与槽号，没有图片文件、路径或「已出图」说法（R30）",
     "分镜视频（R71）有没有先问一句：分镜两件确认后，用户说要才写 `分镜视频.md`；说不要就停在分镜，没写「待补」",
@@ -1969,7 +2050,7 @@ def report(fails, warns, notes, info, _unused, segs):
         if info.get("assets"):
             print("资产编号已定义 %d 条（C／S／P）" % info["assets"])
         if info.get("char_ids"):
-            print("人物资产：角色=%s 个（三张，不分层）" % info["char_ids"])
+            print("人物资产：角色=%s 个（三张，拆两文件）" % info["char_ids"])
         if info.get("scene_ids"):
             print("场景资产：选择=%s，场景=%s 个" % (info.get("scene_choice"), info["scene_ids"]))
         if info.get("style"):
