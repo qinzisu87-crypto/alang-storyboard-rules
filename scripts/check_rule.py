@@ -61,6 +61,7 @@ MUSIC_RE = re.compile(r"(BGM|bgm|背景音乐|背景纯音乐|纯音乐|垫乐|�
 SLOT = re.compile(r"@图片\s*(\d+)")
 RE_SCENE_ASSET_BLOCK = re.compile(r"^##\s*(S\d{2})\s*(.*)$", re.M)
 
+# R77 起场景不再分 A／B；下面两份旧常量只留给旧稿关键词检查，未删。
 SCENE_A_ITEMS = ["场景基础资料", "场景全景图", "正面视图", "侧面视图", "背面视图",
                  "平面布局图", "俯视图", "空间尺寸", "空间坐标",
                  "建筑细节", "门窗细节", "墙面细节", "地面细节"]
@@ -709,80 +710,71 @@ def check_char_assets_split(files, fails, warns):
 
 
 def check_scene_assets(txt, fails, warns):
-    """R29：场景资产按十章出、01–04 归 A、05–10 归 B；选择与节是否对得上；
-    A1–A4 齐全，A2–A4 每条是可粘提示词并带图槽（A3 的尺寸与坐标除外），B 有 B1–B6 时查关键词。"""
-    m = RE_CHAR_CHOICE.search(txt)
-    if not m:
-        fails.append("场景资产.md 缺首行「本集选择：A／B／AB」（R29）")
-        choice = ""
-    else:
-        choice = m.group(1).strip().upper()
-        if choice not in ("A", "B", "AB"):
-            fails.append("场景资产.md 的「本集选择」只能是 A／B／AB，当前是「%s」" % m.group(1).strip())
+    """R77（2026-11-28）：场景资产每个场景只出三张图——俯视图／正打视角／反打视角，
+    默认 16:9；不再分 A／B、不写本集选择。
+    每个 ## Sxx 下三节齐、每节至少一条「提示词：… 图槽：@图片 N」；旧 A／B 十章稿只 WARN。"""
+    if "本集选择" in txt or "### A 资产" in txt or "### B 资产" in txt:
+        warns.append("场景资产.md 仍是旧式 A／B 十章口径（本集选择／A 资产／B 资产）：R77 起每个场景只出三张图（俯视图／正打视角／反打视角，16:9），旧稿不回溯")
 
     blocks = list(RE_SCENE_ASSET_BLOCK.finditer(txt))
     if not blocks:
-        fails.append("场景资产.md 没有场景段（应为「## S01 出租屋」）（R29）")
+        fails.append("场景资产.md 没有场景段（应为「## S01 出租屋」）（R29／R77）")
         return set()
 
+    VIEWS = ("俯视图", "正打视角", "反打视角")
     ids = set()
     for i, b in enumerate(blocks):
         sid, name = b.group(1), b.group(2).strip()
         ids.add(sid)
         end = blocks[i + 1].start() if i + 1 < len(blocks) else len(txt)
         body = txt[b.end():end]
-        has_a = "### A 资产" in body
-        has_b = "### B 资产" in body
-        if choice in ("A", "AB") and not has_a:
-            fails.append("%s 缺「### A 资产」（本集选择是 %s）" % (sid, choice))
-        if choice in ("B", "AB") and not has_b:
-            fails.append("%s 缺「### B 资产」（本集选择是 %s）" % (sid, choice))
-        if choice == "A" and has_b:
-            fails.append("%s 写了 B 资产，但本集只选了 A（不许擅自补齐）" % sid)
-        if choice == "B" and has_a:
-            fails.append("%s 写了 A 资产，但本集只选了 B" % sid)
 
-        if has_a:
-            a_body = body.split("### A 资产", 1)[1].split("### B 资产", 1)[0]
-            secs = {}
-            cur = None
-            for line in a_body.splitlines():
-                hm = re.match(r"^####\s*A(\d)(?:\s*(.*))?$", line.strip())
-                if hm:
-                    cur = hm.group(1)
-                    secs.setdefault(cur, [])
-                    continue
-                if cur and line.strip().startswith("- "):
-                    secs[cur].append(line.strip())
-            if set(secs) != set("1234"):
-                fails.append("%s 的 A 资产小节应为 A1–A4（基础资料／全景三视图／空间布局／细节参考），当前是 %s（R29）"
-                             % (sid, "、".join("A" + k for k in sorted(secs)) or "无"))
-            for kw in SCENE_A_ITEMS:
-                if kw not in a_body:
-                    fails.append("%s 的 A 资产缺「%s」" % (sid, kw))
-            for num in ("2", "3", "4"):
-                for l in secs.get(num, []):
-                    if num == "3" and re.match(r"-\s*(空间尺寸|空间坐标)", l):
-                        continue
-                    if "提示词" not in l:
-                        fails.append("%s 的 A%s 有条目没写成提示词（应以「提示词：」开头）：%s"
-                                     % (sid, num, l[:36]))
-                    elif not SLOT.search(l):
-                        fails.append("%s 的 A%s 有条目没写「图槽：@图片 N」：%s" % (sid, num, l[:36]))
+        lines = body.splitlines()
+        found = {v: [] for v in VIEWS}
+        cur = None
+        for line in lines:
+            st = line.strip()
+            hm = re.match(r"^####\s*(俯视图|正打视角|反打视角)\s*$", st)
+            if hm:
+                cur = hm.group(1)
+                continue
+            if re.match(r"^#{1,4}\s", st):
+                cur = None
+                continue
+            if cur and st.startswith("- "):
+                found[cur].append(st)
 
-        if has_b:
-            b_body = body.split("### B 资产", 1)[1]
-            heads = set(re.findall(r"^####\s*B(\d)", b_body, re.M))
-            if heads and heads != set("123456"):
-                fails.append("%s 的 B 资产小节应为 B1–B6（道具／光照／天气／材质／镜头参考／连续性），当前是 %s（R29）"
-                             % (sid, "、".join("B" + k for k in sorted(heads))))
-            missing = [k for k in SCENE_B_ITEMS if k not in b_body]
-            if missing:
-                fails.append("%s 的 B 资产缺条目：%s" % (sid, "、".join(missing)))
-    if choice == "AB":
-        warns.append("本集选了 AB，B 的道具位置／光照／材质须与 A 的画面一致（脚本查不了，见人工核对第 17 条）")
+        missing = [v for v in VIEWS if not found[v]]
+        if missing:
+            fails.append("%s 缺图：%s（R77：每个场景固定三张——俯视图／正打视角／反打视角）"
+                         % (sid, "、".join(missing)))
+
+        no_ratio = []
+        for v in VIEWS:
+            if not found[v]:
+                continue
+            ok = False
+            for l in found[v]:
+                if "提示词" not in l:
+                    fails.append("%s 的「%s」没写成提示词（应以「提示词：」开头）：%s" % (sid, v, l[:36]))
+                elif not SLOT.search(l):
+                    fails.append("%s 的「%s」没写「图槽：@图片 N」：%s" % (sid, v, l[:36]))
+                elif not re.search(r"16\s*[:：]\s*9|16比9", l):
+                    no_ratio.append(v)
+                else:
+                    ok = True
+            if not ok and v not in no_ratio:
+                no_ratio.append(v)
+        if no_ratio:
+            warns.append("%s 的三张图没写默认画幅 16:9（缺失：%s）：默认三张都写「16:9 横构图」，用户指定别的比例就三张写同一个（R77）"
+                         % (sid, "、".join(no_ratio)))
+
+        fz = "".join("".join(found[v]) for v in VIEWS)
+        if fz and "空景" not in fz and "无人物" not in fz:
+            warns.append("%s 的三张图没写明「空景／无人物」：场景图不站人，人物由人物资产负责（R77）" % sid)
+        if "反打" in body and "180" not in body:
+            warns.append("%s 的反打视角没写「反方向 180°」：正反打必须同轴反向、左右互换（R77）" % sid)
     return ids
-
 
 
 STYLE_DECL = re.compile(r"参考画风[：:]\s*(REF-\d{3})")
@@ -1835,7 +1827,7 @@ def main():
         check_prompt_terms(scene_txt, "场景资产.md", fails)
         notes["scene_ids"] = len(sids)
         sm2 = RE_CHAR_CHOICE.search(scene_txt)
-        notes["scene_choice"] = sm2.group(1).strip().upper() if sm2 else "?"
+        notes["scene_choice"] = "三图" if not sm2 else sm2.group(1).strip().upper()
 
     # ---------- 画风（R31／R64 参考画风） ----------
     texts = {"资产提示词.md": asset_txt}
@@ -2057,7 +2049,7 @@ def report(fails, warns, notes, info, _unused, segs):
         if info.get("char_ids"):
             print("人物资产：角色=%s 个（三张，拆两文件）" % info["char_ids"])
         if info.get("scene_ids"):
-            print("场景资产：选择=%s，场景=%s 个" % (info.get("scene_choice"), info["scene_ids"]))
+            print("场景资产：%s 个场景（每场景三张：俯视图／正打／反打，默认 16:9）" % info["scene_ids"])
         if info.get("style"):
             print("参考画风：%s（只作质感参考，形象按剧情）" % info["style"])
         if notes.get("style_text"):
