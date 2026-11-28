@@ -709,6 +709,43 @@ def check_char_assets_split(files, fails, warns):
     return a_ids & b_ids
 
 
+def check_char_portrait(txt, expected_ids, fails, warns):
+    """R80（2026-11-28）：第三份人物资产 `人物资产-立绘.md`，每个角色只出一张 `A4 人物立绘`——
+    单人、全身、竖构图 3:4、浅灰或纯白无缝棚底、站姿、带图槽。"""
+    if "本集选择" in txt or "### A 资产" in txt or "### B 资产" in txt:
+        warns.append("人物资产-立绘.md 仍是旧式分层或 `本集选择`；R80 只出一张 A4 人物立绘，旧稿不回溯")
+    blocks = _char_body_map(txt)
+    if not blocks:
+        fails.append("人物资产-立绘.md 没有角色段（应为「## C01 周野」）（R80）")
+        return set()
+    ids = set(blocks)
+    if expected_ids:
+        for cid in sorted(expected_ids - ids):
+            fails.append("%s 在 `人物资产-设定卡.md` 有、`人物资产-立绘.md` 没有：三份文件角色号要一一对上（R80）" % cid)
+        for cid in sorted(ids - expected_ids):
+            fails.append("%s 只在 `人物资产-立绘.md` 有、设定卡里没有：三份文件角色号要一一对上（R80）" % cid)
+    for cid, body in blocks.items():
+        heads = re.findall(r"^####\s*A(\d)\s*(.*)$", body, re.M)
+        if len(heads) != 1 or heads[0][0] != "4" or "立绘" not in heads[0][1]:
+            fails.append("%s 的 A4 应只有一节 `A4 人物立绘`，当前是 %s（R80）"
+                         % (cid, "、".join("A%s %s" % (h[0], h[1].strip()) for h in heads) or "无"))
+            continue
+        prompts = [l.strip() for l in body.splitlines() if l.strip().startswith("- ") and "提示词" in l]
+        if not prompts:
+            fails.append("%s 缺一条 `A4 人物立绘` 提示词（R80）" % cid)
+            continue
+        if len(prompts) > 1:
+            fails.append("%s 写了 %d 条立绘提示词：R80 每角色只出一张立绘，不并排、不群像" % (cid, len(prompts)))
+        for l in prompts:
+            if not SLOT.search(l):
+                fails.append("%s 的立绘提示词没写「图槽：@图片 N」：%s" % (cid, l[:36]))
+            if not re.search(r"全身|头顶到鞋底|立绘", l):
+                warns.append("%s 的立绘没写「单人全身／头顶到鞋底」：R80 要一张完整立绘（%s）" % (cid, l[:26]))
+            if not re.search(r"浅中性灰|纯白|无缝", l):
+                warns.append("%s 的立绘没写默认棚底（浅中性灰或纯白无缝）：%s" % (cid, l[:26]))
+    return ids
+
+
 def check_scene_assets(txt, fails, warns):
     """R77（2026-11-28）：场景资产每个场景只出三张图——俯视图／正打视角／反打视角，
     默认 16:9；不再分 A／B、不写本集选择。
@@ -1702,6 +1739,7 @@ def main():
     char_p = ep_dir / "人物资产.md"
     char_card_p = ep_dir / "人物资产-设定卡.md"
     char_body_p = ep_dir / "人物资产-面部与服装.md"
+    char_pt_p = ep_dir / "人物资产-立绘.md"
     scene_p = ep_dir / "场景资产.md"
     prop_p = ep_dir / "道具资产.md"
     legacy_board = ep_dir / "分镜.md"
@@ -1843,6 +1881,13 @@ def main():
         if not char_body_p.is_file():
             fails.append("缺文件：人物资产-面部与服装.md（R75：放面部半身特写＋服装三视图两张）")
         cids = check_char_assets_split(char_texts, fails, warns)
+    if char_pt_p.is_file():
+        pt_txt = read_text(char_pt_p)
+        char_texts[char_pt_p.name] = pt_txt
+        pids2 = check_char_portrait(pt_txt, cids, fails, warns)
+        notes["portrait_ids"] = len(pids2)
+    elif char_card_p.is_file():
+        warns.append("缺 人物资产-立绘.md：R80 起人物资产拆三份，每角色再出一张 A4 人物立绘（单人全身站姿，竖 3:4）；旧稿不回溯")
         for n2, tx2 in char_texts.items():
             check_prompt_terms(tx2, n2, fails)
         notes["char_ids"] = len(cids)
@@ -2055,7 +2100,7 @@ HUMAN = [
     "轴线：同一场是否只在一侧工作，画左画右站位是否全场不变，机位有没有越轴",
     "每场「场景站位」的锚点是否都在本场景里真实存在且不动，剧本与分镜同锚点同编号（R26）",
     "剧本、分镜里的 @C／@S／@P 是否都能在资产提示词.md 找到，编号跨集不重排，三节提示词能直接粘去文生图（R27）",
-    "人物资产是否只写了三张并拆成两个文件——`人物资产-设定卡.md` 只有 A1 设定卡，`人物资产-面部与服装.md` 只有 A2 面部半身＋A3 服装三视图；两个文件头三行齐、角色号一一对上、不分层、不写本集选择行（R28／R74／R75）",
+    "人物资产是否写了四张并拆成三份文件——`人物资产-设定卡.md` 只有 A1，`人物资产-面部与服装.md` 只有 A2＋A3，`人物资产-立绘.md` 只有 A4；三份头三行齐、角色号一一对上、不分层、不写本集选择行；A4 是单人全身立绘、竖 3:4、浅灰或纯白棚底（R28／R74／R75／R80）",
     "场景资产是否只出了用户点的那层，每条是否可粘提示词带图槽（R29）",
     "三类资产是否只交了提示词与槽号，没有图片文件、路径或「已出图」说法（R30）",
     "分镜视频（R71）有没有先问一句：分镜两件确认后，用户说要才写 `分镜视频.md`；说不要就停在分镜，没写「待补」",
@@ -2091,7 +2136,9 @@ def report(fails, warns, notes, info, _unused, segs):
         if info.get("assets"):
             print("资产编号已定义 %d 条（C／S／P）" % info["assets"])
         if info.get("char_ids"):
-            print("人物资产：角色=%s 个（三张，拆两文件）" % info["char_ids"])
+            print("人物资产：角色=%s 个（四张，拆三文件）" % info["char_ids"])
+        if notes.get("portrait_ids") is not None:
+            print("人物立绘：%s 个角色（每角色一张全身立绘）" % notes["portrait_ids"])
         if info.get("scene_ids"):
             print("场景资产：%s 个场景（每场景三张：俯视图／正打／反打，默认 16:9）" % info["scene_ids"])
         if notes.get("prop_ids") is not None:
