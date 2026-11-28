@@ -61,7 +61,7 @@ MUSIC_RE = re.compile(r"(BGM|bgm|背景音乐|背景纯音乐|纯音乐|垫乐|�
 SLOT = re.compile(r"@图片\s*(\d+)")
 RE_SCENE_ASSET_BLOCK = re.compile(r"^##\s*(S\d{2})\s*(.*)$", re.M)
 
-# R77 起场景不再分 A／B；下面两份旧常量只留给旧稿关键词检查，未删。
+# 场景不再分 A／B；下面两份旧常量只留给旧稿关键词检查，未删（场景提示词口径 2026-11-28 已删、待重设）。
 SCENE_A_ITEMS = ["场景基础资料", "场景全景图", "正面视图", "侧面视图", "背面视图",
                  "平面布局图", "俯视图", "空间尺寸", "空间坐标",
                  "建筑细节", "门窗细节", "墙面细节", "地面细节"]
@@ -747,103 +747,26 @@ def check_char_portrait(txt, expected_ids, fails, warns):
 
 
 def check_scene_assets(txt, fails, warns):
-    """R77（2026-11-28）：场景资产每个场景只出三张图——俯视图／正打视角／反打视角，
-    默认 16:9；不再分 A／B、不写本集选择。
-    每个 ## Sxx 下三节齐、每节至少一条「提示词：… 图槽：@图片 N」；旧 A／B 十章稿只 WARN。"""
+    """场景提示词口径已于 2026-11-28 整条删除（原 R77／R86／R87，待重设）。
+    本轮只查：有场景段、每段带 Sxx 编号与场景档案；不查提示词、不查图槽。"""
     if "本集选择" in txt or "### A 资产" in txt or "### B 资产" in txt:
-        warns.append("场景资产.md 仍是旧式 A／B 十章口径（本集选择／A 资产／B 资产）：R77 起每个场景只出三张图（俯视图／正打视角／反打视角，16:9），旧稿不回溯")
+        warns.append("场景资产.md 仍是旧式 A／B 十章口径：旧稿不回溯；场景提示词等新规则（2026-11-28 已删）")
 
     blocks = list(RE_SCENE_ASSET_BLOCK.finditer(txt))
     if not blocks:
-        fails.append("场景资产.md 没有场景段（应为「## S01 出租屋」）（R77）")
+        fails.append("场景资产.md 没有场景段（应为「## S01 出租屋」）")
         return set()
 
-    VIEWS = ("俯视图", "正打视角", "反打视角")
     ids = set()
-    for i, b in enumerate(blocks):
-        sid, name = b.group(1), b.group(2).strip()
+    for i2, b in enumerate(blocks):
+        sid = b.group(1)
         ids.add(sid)
-        end = blocks[i + 1].start() if i + 1 < len(blocks) else len(txt)
+        end = blocks[i2 + 1].start() if i2 + 1 < len(blocks) else len(txt)
         body = txt[b.end():end]
-
-        lines = body.splitlines()
-        found = {v: [] for v in VIEWS}
-        cur = None
-        for line in lines:
-            st = line.strip()
-            hm = re.match(r"^####\s*(俯视图|正打视角|反打视角)\s*$", st)
-            if hm:
-                cur = hm.group(1)
-                continue
-            if re.match(r"^#{1,4}\s", st):
-                cur = None
-                continue
-            if cur and st.startswith("- "):
-                found[cur].append(st)
-
-        missing = [v for v in VIEWS if not found[v]]
-        if missing:
-            fails.append("%s 缺图：%s（R77：每个场景固定三张——俯视图／正打视角／反打视角）"
-                         % (sid, "、".join(missing)))
-
-        no_ratio = []
-        for v in VIEWS:
-            if not found[v]:
-                continue
-            ok = False
-            for l in found[v]:
-                if "提示词" not in l:
-                    fails.append("%s 的「%s」没写成提示词（应以「提示词：」开头）：%s" % (sid, v, l[:36]))
-                elif not SLOT.search(l):
-                    fails.append("%s 的「%s」没写「图槽：@图片 N」：%s" % (sid, v, l[:36]))
-                elif not re.search(r"16\s*[:：]\s*9|16比9", l):
-                    no_ratio.append(v)
-                else:
-                    ok = True
-            if not ok and v not in no_ratio:
-                no_ratio.append(v)
-        if no_ratio:
-            warns.append("%s 的三张图没写默认画幅 16:9（缺失：%s）：默认三张都写「16:9 横构图」，用户指定别的比例就三张写同一个（R77）"
-                         % (sid, "、".join(no_ratio)))
-
-        # R87：俯视图画面里不许出现任何文字
-        BAD_TEXT = ("↑", "主入口方向", "上为北", "文字标注", "房间名", "图例", "尺寸标注")
-        top_txt = "".join(found["俯视图"])
-        if top_txt:
-            hit = [w for w in BAD_TEXT if w in top_txt]
-            if hit:
-                fails.append("%s 的俯视图提示词里要求画字（%s）：俯视图是纯图形平面图，画面里不许出现任何文字／数字／编号／箭头文案／图例／标注（R87）；方向改写在提示词正文或场景档案「本图方向：…」，不进画面"
-                             % (sid, "、".join(hit)))
-            if ("无任何文字" not in top_txt) and ("无文字" not in top_txt):
-                warns.append("%s 的俯视图没写「画面内无任何文字、无数字编号、无箭头标注、无水印」：这是俯视图的固定句（R87）" % sid)
-
-        fz = "".join("".join(found[v]) for v in VIEWS)
-        if fz and "空景" not in fz and "无人物" not in fz:
-            warns.append("%s 的三张图没写明「空景／无人物」：场景图不站人，人物由人物资产负责（R77）" % sid)
-        if "反打" in body and "180" not in body:
-            warns.append("%s 的反打视角没写「反方向 180°」：正反打必须同轴反向、左右互换（R77）" % sid)
-
-        # R86：三张必须是同一空间的三个机位，不是三张不同的图
-        LANDMARK = ("门", "窗", "桌", "床", "柜", "墙", "地板", "地砖", "柜台", "公告栏",
-                    "石阶", "台阶", "楼梯", "柱", "梁", "灶", "屏风", "帘", "栏杆",
-                    "门框", "窗框", "招牌", "壁炉", "灯", "碑", "案", "榻", "架",
-                    "炉", "井", "桥", "树", "石", "摊", "车", "船")
-        POS = re.compile(r"([\u4e00-\u9fa5A-Za-z0-9]{1,6})(?:在画左|在画右|位于画)")
-        lm = {}
-        for v in VIEWS:
-            txt_v = "".join(found[v])
-            lm[v] = set(w for w in LANDMARK if w in txt_v) | set(m.group(1) for m in POS.finditer(txt_v))
-        if all(found[v] for v in VIEWS):
-            a, b, top = lm["正打视角"], lm["反打视角"], lm["俯视图"]
-            if len(a & b) < 2:
-                fails.append("%s 的正打与反打只有 %d 个地标重合（%s）：三张必须是同一个空间的三个机位，正反打至少共用 2 件地标（门／窗／桌／床／墙…），左右互换逐件对得上（R86）"
-                             % (sid, len(a & b), "、".join(sorted(a & b)) or "无"))
-            if len(top & (a | b)) < 2:
-                fails.append("%s 的俯视图与正打／反打只有 %d 个地标重合：俯视图必须是同一空间的正投影，门窗家具位置要能对上两个视角（R86）"
-                             % (sid, len(top & (a | b))))
-            both = "".join("".join(found[v]) for v in VIEWS)
-            if "同一空间" not in both and "同一场景" not in both:
-                warns.append("%s 的三张图没写「同一空间／同一场景」锚句：三张都写同一句「空间锚：场景名｜门窗桌床逐件＋画左画右｜光位时段」，只许视角不同（R86）" % sid)
+        if "场景档案" not in body:
+            warns.append("%s 没有「### 场景档案」：场景提示词待重设，本轮至少要交编号与档案（资料／尺寸／坐标／光照与天气／材质／轴线）" % sid)
+        if "提示词" in body:
+            warns.append("%s 里写了「提示词」：场景提示词口径已整条删除（待重设），新规则下来前不写提示词、不写图槽" % sid)
     return ids
 
 
@@ -2226,14 +2149,12 @@ HUMAN = [
     "连续动作链（走进来→坐下→手放桌上→指节敲桌）是否作为一条链给到 4 秒，链尾收在完成态；孤立小动作仍 1–2 秒（R83）",
     "每镜列5 景别段是否写成了「景别＋这一镜画面」——谁在画左画右、前景压什么、看得见什么；只写镜头名算没写完（R82）",
     "写分镜视频时是否以镜头表为主体：段骨架与动作、台词、时长能否逐项在镜头表第 N 行找到出处；文本分镜只补视线、手部、道具状态等细节，没有多出动作拍或台词（R84）",
-    "俯视图（R87）画面里有没有字符：文字、数字、字母编号、箭头文案、图例、水印、房间名、尺寸标注都不许出现；方向是不是只写在提示词正文或场景档案里（`本图方向：…`）；锚点物是不是只用细线框／色圈、没挂文字标签；提示词有没有写「画面内无任何文字、无数字编号、无箭头标注、无水印」",
-    "场景三张（R86）是不是同一个空间的三个机位：同一场景名、同一墙地材质、同一门窗数量与位置、同一家具摆位、同一道具锚点、同一光位时段；三张有没有同一句「空间锚：…」；正打与反打是否互相看得见对方那一侧的墙与家具、左右互换逐件对得上；俯视图的门窗家具位置能否对上两个视角；有没有一张雨一张晴、一张白天一张夜里、三张各写一个场景名",
     "「表情」是否先有情绪定调（什么情绪、几成、对着谁），再写眉·眼·鼻·嘴·颈·手的执行清单",
     "轴线：同一场是否只在一侧工作，画左画右站位是否全场不变，机位有没有越轴",
     "每场「场景站位」的锚点是否都在本场景里真实存在且不动，剧本与分镜同锚点同编号（R26）",
     "剧本、分镜里的 @C／@S／@P 是否都能在资产提示词.md 找到，编号跨集不重排，三节提示词能直接粘去文生图（R27）",
     "人物资产是否写了四张并拆成三份文件——`人物资产-设定卡.md` 只有 A1，`人物资产-面部与服装.md` 只有 A2＋A3，`人物资产-立绘.md` 只有 A4；三份头三行齐、角色号一一对上、不分层、不写本集选择行；A4 是单人全身立绘、竖 3:4、浅灰或纯白棚底（R28／R74／R75／R80）",
-    "场景资产是否只出了用户点的那层，每条是否可粘提示词带图槽（R77）",
+    "场景资产是否只写了 Sxx 编号与场景档案、没有写提示词与图槽（场景提示词待重设，2026-11-28）",
     "三类资产是否只交了提示词与槽号，没有图片文件、路径或「已出图」说法（R30）",
     "分镜视频（R71）有没有先问一句：分镜两件确认后，用户说要才写 `分镜视频.md`；说不要就停在分镜，没写「待补」",
     "取料主从（R84）：第 N 段骨架是否取自镜头表第 N 行（列1 秒数／列2 交接／列3 锚点与光／列5 逐秒／列6 台词与声音），文本分镜第 N 节只用来补视线、手部、道具状态等可见细节；两处冲突以镜头表为准，没有多出动作拍或台词",
@@ -2276,7 +2197,7 @@ def report(fails, warns, notes, info, _unused, segs):
         if notes.get("bare_lens") is not None:
             print("镜头画面句：%s 镜只写了镜头名（R82，WARN）" % notes["bare_lens"])
         if info.get("scene_ids"):
-            print("场景资产：%s 个场景（每场景三张：俯视图／正打／反打，默认 16:9）" % info["scene_ids"])
+            print("场景资产：%s 个场景（仅编号与场景档案；场景提示词待重设）" % info["scene_ids"])
         if notes.get("prop_ids") is not None:
             print("道具资产：%s 件（每件一张白底道具资产图）" % notes["prop_ids"])
         if info.get("style"):
